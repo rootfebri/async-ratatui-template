@@ -4,7 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Stylize, Widget};
 use ratatui::style::Color;
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 
 use crate::Area;
@@ -71,7 +71,7 @@ impl Input {
       Event::Key(keys!(Enter, NONE, Press)) => Some(UnhandledEvent::handled()),
       Event::Key(keys!(Esc, NONE, Press)) => Some(UnhandledEvent::canceled()),
       Event::Key(keys!(Left, NONE, Press)) => {
-        self.cursor -= 1;
+        self.cursor = self.cursor.saturating_sub(1);
         Some(UnhandledEvent::render())
       }
       Event::Key(keys!(Right, NONE, Press)) => {
@@ -144,7 +144,7 @@ impl Input {
       vec![Span::from(left), self.cursor(), Span::from(right)]
     };
 
-    Paragraph::new(Text::from_iter(spans))
+    Paragraph::new(Line::from_iter(spans))
       .block(block)
       .wrap(Wrap { trim: true })
       .render(area, buf);
