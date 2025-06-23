@@ -1,0 +1,25 @@
+[package]
+name = "helper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.crossterm]
+workspace = true
+
+[dependencies.serde]
+workspace = true
+
+[dependencies.anyhow]
+workspace = true
+
+[dependencies.ratatui]
+workspace = true
+
+[dependencies.strum]
+workspace = true
+
+[dependencies.pin-project]
+workspace = true
+
+[dependencies.futures]
+workspace = true
