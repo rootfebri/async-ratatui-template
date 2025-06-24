@@ -2,9 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use Status::*;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::prelude::{Stylize, Widget};
+use ratatui::prelude::Stylize;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
@@ -24,17 +22,18 @@ pub struct BucketStatus {
 
 impl BucketStatus {
   const BASE: &'static str = "https://s3.region.amazonaws.com/bucket";
+
   pub async fn new(name: impl Into<Arc<str>>) -> Result<Self> {
     let name = name.into();
     let check_date = Timestamp::now();
-    let mut region = Region::UsEast1;
+    let mut region = Region::from_ip(name.as_ref()).await.unwrap_or(Region::UsEast1);
     let url = Self::BASE.replace("region", region.as_ref()).replace("bucket", name.as_ref());
 
     let response = head(&url).await?;
     if response.status().as_u16() == 404 {
       return Ok(BucketStatus {
         name: name.clone(),
-        region: Region::from_ip(name.as_ref()).await.unwrap_or(region),
+        region,
         status: Available,
         code: StatusCode::NOT_FOUND,
         check_date,
@@ -84,7 +83,7 @@ impl Display for BucketStatus {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     use ratatui::symbols::line::DOUBLE_VERTICAL_LEFT as SEP;
 
-    write!(f, "{}{}{}", self.status, SEP, self.name)
+    write!(f, "{SEP}{}{SEP}{}({})", self.status, self.name, self.region)
   }
 }
 
@@ -163,5 +162,15 @@ mod tests {
     let bucket_status = BucketStatus::new(domain).await.unwrap();
     assert!(bucket_status.status.is_unavailable());
     assert_eq!(bucket_status.code.as_u16(), 403);
+
+    let domain = "s3.ucod.kr";
+    let bucket_status = BucketStatus::new(domain).await.unwrap();
+    assert!(bucket_status.status.is_unavailable(), "Bucket should be unavailable {bucket_status:#?}");
+    assert_ne!(
+      bucket_status.code.as_u16(),
+      404,
+      "Bucket status code should not 404 {}",
+      bucket_status.code
+    );
   }
 }

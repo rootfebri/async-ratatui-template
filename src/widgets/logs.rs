@@ -73,7 +73,7 @@ impl Widget for &Logs {
     let title = Line::raw(" 📈Activities ").left_aligned();
     let block = blk().title_top(title);
     let locked_items = self.items.blocking_read();
-    let items = locked_items.iter().map(Log::as_list_item).collect::<Vec<_>>();
+    let items = locked_items.iter().map(Log::as_list_item).rev().collect::<Vec<_>>();
     let list = List::default().items(items).block(block).direction(ListDirection::BottomToTop);
 
     {

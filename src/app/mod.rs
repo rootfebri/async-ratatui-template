@@ -9,7 +9,6 @@ type MpscTx<T> = mpsc::Sender<T>;
 pub mod handler;
 
 mod app_;
-mod app_data;
 mod exports;
 mod popup;
 mod screen;

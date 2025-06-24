@@ -13,8 +13,8 @@ use crate::widgets::{Log, Logs};
 pub struct TaskQueue(VecDeque<JoinHandle<()>>);
 
 impl TaskQueue {
-  pub fn spawn(&mut self, future: impl Future<Output = ()> + 'static) {
-    let task = tokio::task::spawn_local(future);
+  pub fn spawn(&mut self, future: impl Future<Output = ()> + 'static + Send) {
+    let task = tokio::task::spawn(future);
     self.push_back(task);
   }
 

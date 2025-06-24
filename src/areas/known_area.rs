@@ -1,11 +1,15 @@
+use std::sync::Arc;
+
 use ratatui::layout::Position;
 
 use super::*;
 
 #[derive(Debug, Default)]
 pub struct KnownArea {
-  inner: Cell<Option<Rect>>,
+  inner: Arc<Cell<Option<Rect>>>,
 }
+unsafe impl Send for KnownArea {}
+unsafe impl Sync for KnownArea {}
 impl KnownArea {
   pub fn replace(&self, inner: impl Into<Option<Rect>>) {
     self.inner.replace(inner.into());

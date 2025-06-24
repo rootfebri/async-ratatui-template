@@ -1,12 +1,10 @@
-use std::collections::BTreeSet;
 use std::fs;
-use std::net::{IpAddr, Ipv4Addr};
-use std::str::FromStr;
+use std::net::Ipv4Addr;
 use std::sync::{Arc, LazyLock};
 
-use cidr::{Cidr, Ipv4Cidr};
-use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, Display, EnumIs, FromRepr, VariantArray, VariantNames};
+use cidr::Ipv4Cidr;
+use serde::Deserialize;
+use strum::EnumIs;
 
 use crate::app::handler::get_ip;
 
@@ -158,8 +156,17 @@ impl Region {
   }
   pub async fn from_ip(name: &str) -> Option<Self> {
     let domain = addr::parse_domain_name(name).ok()?;
+    #[cfg(test)]
+    eprintln!("Parse Domain success!");
+
     let ip = get_ip(domain).await?;
-    AWS_IP.get_prefix(&ip, None).map(|prefix| prefix.region)
+    #[cfg(test)]
+    eprintln!("Parse IP success! {ip}");
+
+    let region = AWS_IP.get_prefix(&ip, None).map(|prefix| prefix.region)?;
+    #[cfg(test)]
+    eprintln!("Parse Region success! {region}");
+    Some(region)
   }
 }
 impl From<&str> for Region {
@@ -208,5 +215,11 @@ mod tests {
 
     let prefix = prefix.unwrap();
     assert!(prefix.region.is_us_east_2());
+  }
+
+  #[tokio::test]
+  async fn test_from_ip() {
+    let region = Region::from_ip("s3.ucod.kr").await.unwrap();
+    assert_eq!(region, Region::ApNortheast2);
   }
 }

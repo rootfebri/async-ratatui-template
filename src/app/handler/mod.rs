@@ -1,7 +1,6 @@
 use std::net::Ipv4Addr;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, Local};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::*;
 use trust_dns_resolver::TokioAsyncResolver;
@@ -56,20 +55,13 @@ async fn head(u: impl IntoUrl) -> Result<Response> {
   Client::builder()
     .default_headers(HeaderMap::from_iter(BUCKET_HEAD))
     .build()?
-    .head(u)
+    .get(u)
     .send()
     .await
 }
 
 pub async fn get_ip(domain: addr::domain::Name<'_>) -> Option<Ipv4Addr> {
-  TAR
-    .ipv4_lookup(domain.as_str())
-    .await
-    .ok()?
-    .as_lookup()
-    .records()
-    .first()?
-    .data()?
-    .as_a()
-    .map(|a| a.0)
+  let lookup = TAR.ipv4_lookup(domain.as_str()).await.ok()?;
+  let a = lookup.as_lookup().records().iter().find(|r| r.data().is_some_and(|d| d.is_a()))?;
+  Some(a.data()?.as_a()?.0)
 }

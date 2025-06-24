@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::Error;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::prelude::{Color, Stylize, Text, Widget};
-use ratatui::text::{Line, Span, ToLine, ToSpan};
+use ratatui::prelude::{Color, Stylize};
+use ratatui::text::{Line, Span, ToSpan};
 use ratatui::widgets::ListItem;
 
 use crate::app::handler::BucketStatus;
@@ -45,10 +43,10 @@ impl Log {
     }
   }
 
-  fn timestamp_span(&self) -> Line<'_> {
+  fn timestamp_span(&self) -> [Span; 3] {
     match *self {
-      Log::Bucket(ref bucket) => bucket.timestamp().into(),
-      Log::Info { ref timestamp, .. } | Log::Error { ref timestamp, .. } | Log::Warn { ref timestamp, .. } => timestamp.into(),
+      Log::Bucket(ref bucket) => bucket.timestamp().as_spans(),
+      Log::Info { ref timestamp, .. } | Log::Error { ref timestamp, .. } | Log::Warn { ref timestamp, .. } => timestamp.as_spans(),
     }
   }
 
@@ -64,14 +62,17 @@ impl Log {
 
 impl<'a> From<&'a Log> for ListItem<'a> {
   fn from(log: &'a Log) -> Self {
-    let content = match log {
-      Log::Bucket(bucket) => return ListItem::from(bucket).on_blue(),
-      Log::Info { line, .. } => Line::from(line.as_ref()).fg(Color::Rgb(0, 251, 255)),
-      Log::Warn { line, .. } => Line::from(line.as_ref()).fg(Color::Rgb(137, 82, 0)),
-      Log::Error { error, .. } => Line::from(error.to_line()).fg(Color::Rgb(99, 0, 0)),
-    };
-    let prefix = log.timestamp_span();
+    let mut spans = log.timestamp_span().to_vec();
 
-    ListItem::from(prefix + content)
+    let content = match log {
+      Log::Bucket(bucket) => return ListItem::from(bucket),
+      Log::Info { line, .. } => Span::from(line.as_ref()).fg(log.color_content()),
+      Log::Warn { line, .. } => Span::from(line.as_ref()).fg(log.color_content()),
+      Log::Error { error, .. } => error.to_span().fg(log.color_content()),
+    };
+
+    spans.push(content);
+
+    ListItem::from(Line::from_iter(spans))
   }
 }

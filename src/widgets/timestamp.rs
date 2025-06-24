@@ -3,7 +3,6 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local};
 use ratatui::prelude::{Color, Stylize};
 use ratatui::text::{Line, Span};
-use strum::Display;
 
 impl Default for Timestamp {
   fn default() -> Self {

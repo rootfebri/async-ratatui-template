@@ -14,6 +14,11 @@ use crate::widgets::{Alert, Input, Logs};
 
 mod impls;
 
+pub enum InOutChangeMode {
+  Input,
+  Output,
+}
+
 pub struct App {
   state: State,
   popup: Option<Popup>,
@@ -21,6 +26,7 @@ pub struct App {
   // App data
   input: Option<PathBuf>,
   output: Option<PathBuf>,
+  change_mode: Option<InOutChangeMode>,
 
   // bg task
   #[allow(dead_code)]
@@ -48,6 +54,13 @@ impl App {
     UnhandledEvent::no_ops()
   }
 
+  pub fn change_output(&mut self, input: Input) -> UnhandledEvent {
+    let output_file = PathBuf::from(input.value());
+    self.output = Some(output_file);
+    self.output_tx.send_modify(|current| *current = self.output.clone().unwrap());
+
+    UnhandledEvent::render()
+  }
   pub async fn change_input(&mut self, input: Input) -> UnhandledEvent {
     let input_file = PathBuf::from(input.value());
     if !input_file.exists() {
@@ -75,12 +88,14 @@ impl App {
         let input = Input::new(" Enter full/relative path to file input: ".to_string(), "Start typing...".to_string());
         let popup = Popup::Input(input);
         self.popup = Some(popup);
+        self.change_mode = Some(InOutChangeMode::Input);
         Some(UnhandledEvent::render())
       }
       keys!(Char('o'), NONE, Press) => {
         let input = Input::new(" Enter full/relative path to file output: ".to_string(), "Start typing...".to_string());
         let popup = Popup::Input(input);
         self.popup = Some(popup);
+        self.change_mode = Some(InOutChangeMode::Output);
         Some(UnhandledEvent::render())
       }
       keys!(Char('s'), NONE, Press) => {
@@ -104,7 +119,15 @@ impl App {
     {
       if handled.kind.is_handled() {
         match self.popup.take().unwrap() {
-          Popup::Input(input) => return self.change_input(input).await,
+          Popup::Input(input) => match self.change_mode {
+            None => {}
+            Some(ref mode) => {
+              return match mode {
+                InOutChangeMode::Input => self.change_input(input).await,
+                InOutChangeMode::Output => self.change_output(input),
+              };
+            }
+          },
           Popup::Confirmation(_) => todo!(),
           Popup::Warning(_) => todo!(),
           Popup::Alert(_) => return UnhandledEvent::render(),
