@@ -55,7 +55,7 @@ async fn head(u: impl IntoUrl) -> Result<Response> {
   Client::builder()
     .default_headers(HeaderMap::from_iter(BUCKET_HEAD))
     .build()?
-    .get(u)
+    .head(u)
     .send()
     .await
 }

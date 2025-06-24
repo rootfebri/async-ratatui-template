@@ -10,7 +10,7 @@ use tokio::task::JoinSet;
 
 use super::*;
 use crate::ui::blk;
-use crate::widgets::{Alert, Input, Logs};
+use crate::widgets::{Alert, Input, Logs, Statistic};
 
 mod impls;
 
@@ -34,18 +34,22 @@ pub struct App {
   event_watcher: WatchTx<UnhandledEvent>,
   pub output_tx: WatchTx<PathBuf>,
   pub input_tx: WatchTx<PathBuf>,
+  pub state_tx: WatchTx<State>,
   focus: bool,
   scrols: ScrollStates,
   logs: Logs,
+  statistic: Statistic,
 }
 
 impl App {
   pub fn exit(&self) -> bool {
     self.state == State::Exit
   }
+
   pub fn subscribe_event(&self) -> WatchRx<UnhandledEvent> {
     self.event_watcher.subscribe()
   }
+
   pub async fn handle_mouse(&mut self, mouse: MouseEvent) -> UnhandledEvent {
     if let Some(handle) = self.logs.handle_mouse(mouse).await {
       return handle;
@@ -61,6 +65,7 @@ impl App {
 
     UnhandledEvent::render()
   }
+
   pub async fn change_input(&mut self, input: Input) -> UnhandledEvent {
     let input_file = PathBuf::from(input.value());
     if !input_file.exists() {
@@ -100,20 +105,24 @@ impl App {
       }
       keys!(Char('s'), NONE, Press) => {
         self.state = State::Processing;
+        self.state_tx.send_modify(|current| *current = self.state);
         Some(UnhandledEvent::render())
       }
       keys!(Char('c'), CONTROL, Press) => {
         self.state = State::Exit;
+        self.state_tx.send_modify(|current| *current = self.state);
         Some(UnhandledEvent::render())
       }
       keys!(Esc, NONE, Press) => {
         self.state = State::Iddling;
+        self.state_tx.send_modify(|current| *current = self.state);
         Some(UnhandledEvent::render())
       }
       KeyEvent { .. } => None,
     }
   }
-  pub(crate) async fn handle(&mut self, event: Event) -> UnhandledEvent {
+
+  pub async fn handle(&mut self, event: Event) -> UnhandledEvent {
     if let Some(popup) = self.popup.as_mut()
       && let Some(handled) = popup.handle_event(&event)
     {
@@ -150,6 +159,13 @@ impl App {
         */
       }
       Event::Key(key) => {
+        // First try to handle logs scrolling if no popup is active
+        if self.popup.is_none()
+          && let Some(handled) = self.logs.handle_key(key).await
+        {
+          return handled;
+        }
+
         if let Some(unhandled_event) = self.handle_key(key).await {
           return unhandled_event;
         }
@@ -179,7 +195,8 @@ impl App {
       .wrap(Wrap { trim: true })
       .scroll(self.scrols.input_widget)
   }
-  pub fn draw_output_widget(&self) -> impl Widget {
+
+  fn draw_output_widget(&self) -> impl Widget {
     let block = blk().title_top(" Output File: ").title_alignment(Alignment::Left);
     let input_value = if let Some(ref path) = self.output {
       path.display().to_string()
@@ -210,6 +227,10 @@ impl Widget for &App {
     tokio::task::block_in_place(|| {
       self.draw_input_widget().render(control_chunks[0], buf);
       self.draw_output_widget().render(control_chunks[1], buf);
+
+      // Render statistic widget in the right column
+      self.statistic.render(controls[1], buf);
+
       self.logs.render(activity, buf);
 
       if let Some(ref popup) = self.popup {

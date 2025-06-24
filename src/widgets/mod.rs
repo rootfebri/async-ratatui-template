@@ -1,16 +1,11 @@
 mod input;
 pub use input::*;
 
-mod select;
-
 mod statistic;
 pub use statistic::*;
 
 mod logs;
 pub use logs::*;
-
-mod help;
-pub use help::*;
 
 mod confirmation;
 pub use confirmation::*;

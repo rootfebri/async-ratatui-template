@@ -2,15 +2,21 @@ use std::path::PathBuf;
 
 use helper::UnhandledEvent;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::watch::Sender;
+use tokio::sync::watch::{Receiver, Sender};
 use tokio::{fs, select};
 
 use crate::app::handler::BucketStatus;
-use crate::app::{MpscRx, WatchRx};
+use crate::app::{MpscRx, State, WatchRx};
 use crate::never;
 use crate::widgets::{Log, Logs};
 
-pub async fn output_writer(mut bucket_rx: MpscRx<BucketStatus>, mut output_rx: WatchRx<PathBuf>, event: Sender<UnhandledEvent>, logs: Logs) {
+pub async fn output_writer(
+  mut bucket_rx: MpscRx<BucketStatus>,
+  mut output_rx: WatchRx<PathBuf>,
+  event: Sender<UnhandledEvent>,
+  logs: Logs,
+  receiver: Receiver<State>,
+) {
   let mut output = output_rx.borrow_and_update().clone();
   loop {
     select! {

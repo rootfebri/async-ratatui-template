@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use crossterm::event::{MouseEvent, MouseEventKind};
-use helper::UnhandledEvent;
+use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
+use helper::{UnhandledEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::prelude::{StatefulWidget, Widget};
@@ -24,6 +24,39 @@ pub struct Logs {
 }
 
 impl Logs {
+  pub async fn handle_key(&self, key: KeyEvent) -> Option<UnhandledEvent> {
+    match key {
+      keys!(Up, NONE, Press) => {
+        self.state.write().await.scroll_up_by(1);
+        Some(UnhandledEvent::render())
+      }
+      keys!(Down, NONE, Press) => {
+        self.state.write().await.scroll_down_by(1);
+        Some(UnhandledEvent::render())
+      }
+      keys!(PageUp, NONE, Press) => {
+        self.state.write().await.scroll_up_by(10);
+        Some(UnhandledEvent::render())
+      }
+      keys!(PageDown, NONE, Press) => {
+        self.state.write().await.scroll_down_by(10);
+        Some(UnhandledEvent::render())
+      }
+      keys!(Home, NONE, Press) => {
+        let items_count = self.items.read().await.len();
+        if items_count > 0 {
+          self.state.write().await.select(Some(items_count - 1));
+        }
+        Some(UnhandledEvent::render())
+      }
+      keys!(End, NONE, Press) => {
+        self.state.write().await.select(Some(0));
+        Some(UnhandledEvent::render())
+      }
+      _ => None,
+    }
+  }
+
   pub async fn handle_mouse(&self, mouse_event: MouseEvent) -> Option<UnhandledEvent> {
     use MouseEventKind::{ScrollDown, ScrollUp};
 
