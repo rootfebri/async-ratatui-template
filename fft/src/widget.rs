@@ -126,14 +126,16 @@ impl<'s> Explorer<'s> {
 
 fn center_constraints(area: Rect, w: Constraint, h: Constraint) -> Rect {
   let [_, w, _] = Layout::horizontal([Constraint::Fill(1), w, Constraint::Fill(1)]).areas(area);
-  Layout::vertical([Constraint::Fill(1), h, Constraint::Fill(1)]).areas::<2>(w)[1]
+  Layout::vertical([Constraint::Fill(1), h, Constraint::Fill(1)]).split(w)[1]
 }
 
 impl Widget for Explorer<'_> {
   fn render(mut self, area: Rect, buf: &mut Buffer) {
     let area = center_constraints(area, Constraint::Percentage(80), Constraint::Max(10));
     let [left, content_area] = Layout::horizontal([Constraint::Fill(1); 2]).spacing(Spacing::Space(1)).areas::<2>(area);
-    let [file_area, input_area] = Layout::vertical([Constraint::Fill(1); 2]).spacing(Spacing::Space(1)).areas::<2>(left);
+    let [file_area, input_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(3)])
+      .spacing(Spacing::Space(1))
+      .areas::<2>(left);
 
     // clear(content_area, buf);
     // clear(file_area, buf);
