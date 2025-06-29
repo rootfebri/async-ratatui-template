@@ -7,104 +7,37 @@ pub mod widget;
 pub use char_stream::*;
 
 /// Trait for extending `String` with additional functionalities.
-/// This trait provides methods for manipulating strings in a way that is useful for text input handling,
-/// such as pushing and removing characters, words, and fuzzy matching.
+/// This trait provides methods for manipulating strings in a way that is useful for text input handling.
+/// All methods work with byte positions for proper UTF-8 handling.
 pub trait StringExt {
-  /// Push a character into the string at the current position.
-  fn push_char(&mut self, chr: char, char_pos: &mut usize);
-  /// Remove a character at the current position.
-  fn remove_char(&mut self, char_pos: usize) -> Option<char>;
-  /// Remove a word backwards from the current position.
-  /// Returns the number of characters removed and a SeekFrom indicating the new cursor position.
-  fn remove_word_backwards(&mut self, char_pos: &mut usize);
-  /// Remove a word forwards from the current position.
-  /// Returns the number of characters removed and a SeekFrom indicating cursor movement.
-  fn remove_word_forwards(&mut self, char_pos: usize);
+  /// Insert a character at the given byte position.
+  fn insert_char_at_byte(&mut self, byte_pos: usize, chr: char);
+  /// Remove a character at the given byte position.
+  fn remove_char_at_byte(&mut self, byte_pos: usize) -> Option<char>;
 }
 
 impl StringExt for String {
-  fn push_char(&mut self, chr: char, char_pos: &mut usize) {
-    // Convert character position to byte position for insertion
-    let byte_pos = self.char_indices().nth(*char_pos).map(|(pos, _)| pos).unwrap_or(self.len());
-
-    self.insert(byte_pos, chr);
-    *char_pos += 1;
+  fn insert_char_at_byte(&mut self, byte_pos: usize, chr: char) {
+    if byte_pos <= self.len() && self.is_char_boundary(byte_pos) {
+      self.insert(byte_pos, chr);
+    }
   }
 
-  fn remove_char(&mut self, char_pos: usize) -> Option<char> {
-    // Find the character at the given position
-    if let Some((byte_pos, chr)) = self.char_indices().nth(char_pos) {
-      self.remove(byte_pos);
+  fn remove_char_at_byte(&mut self, byte_pos: usize) -> Option<char> {
+    if byte_pos >= self.len() || !self.is_char_boundary(byte_pos) {
+      return None;
+    }
+
+    // Find the character at the given byte position
+    let chr = self[byte_pos..].chars().next()?;
+    let char_end = byte_pos + chr.len_utf8();
+    
+    // Ensure we don't go out of bounds
+    if char_end <= self.len() {
+      self.drain(byte_pos..char_end);
       Some(chr)
     } else {
       None
-    }
-  }
-
-  fn remove_word_backwards(&mut self, char_pos: &mut usize) {
-    if self.is_empty() || *char_pos == 0 {
-      return;
-    }
-
-    let chars: Vec<char> = self.chars().collect();
-    let mut end_pos = (*char_pos).min(chars.len());
-    let start_pos = end_pos;
-
-    // Move backwards to skip any trailing whitespace at cursor
-    while end_pos > 0 && chars[end_pos - 1].is_whitespace() {
-      end_pos -= 1;
-    }
-
-    // Move backwards to find the start of the word
-    while end_pos > 0 && !chars[end_pos - 1].is_whitespace() {
-      end_pos -= 1;
-    }
-
-    let removed_count = start_pos - end_pos;
-
-    if removed_count == 0 {
-      return;
-    }
-    // Convert character positions to byte positions
-    let start_byte = self.char_indices().nth(end_pos).map(|(pos, _)| pos).unwrap_or(0);
-    let end_byte = self.char_indices().nth(start_pos).map(|(pos, _)| pos).unwrap_or(self.len());
-
-    self.drain(start_byte..end_byte);
-
-    // Return absolute position to the start of removed text
-    *char_pos = end_pos;
-  }
-
-  fn remove_word_forwards(&mut self, char_pos: usize) {
-    if self.is_empty() {
-      return;
-    }
-
-    let chars: Vec<char> = self.chars().collect();
-    let mut start_pos = char_pos.min(chars.len());
-    let original_start = start_pos;
-
-    // Skip any leading whitespace at cursor
-    while start_pos < chars.len() && chars[start_pos].is_whitespace() {
-      start_pos += 1;
-    }
-
-    // Find the end of the word
-    let mut end_pos = start_pos;
-    while end_pos < chars.len() && !chars[end_pos].is_whitespace() {
-      end_pos += 1;
-    }
-
-    let removed_count = end_pos - original_start;
-
-    if removed_count > 0 {
-      // Convert character positions to byte positions
-      let start_byte = self.char_indices().nth(original_start).map(|(pos, _)| pos).unwrap_or(self.len());
-      let end_byte = self.char_indices().nth(end_pos).map(|(pos, _)| pos).unwrap_or(self.len());
-
-      if start_byte < self.len() {
-        self.drain(start_byte..end_byte);
-      }
     }
   }
 }
@@ -159,42 +92,22 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_push_char() {
+  fn test_insert_char_at_byte() {
     let mut s = String::from("hello");
-    let mut pos = 2;
-    s.push_char('X', &mut pos);
+    s.insert_char_at_byte(2, 'X');
     assert_eq!(s, "heXllo");
-    assert_eq!(pos, 3);
 
     let mut s = String::new();
-    let mut pos = 0;
-    s.push_char('A', &mut pos);
+    s.insert_char_at_byte(0, 'A');
     assert_eq!(s, "A");
-    assert_eq!(pos, 1);
   }
 
   #[test]
-  fn test_remove_char() {
+  fn test_remove_char_at_byte() {
     let mut s = String::from("hello");
-    assert_eq!(s.remove_char(1), Some('e'));
+    assert_eq!(s.remove_char_at_byte(1), Some('e'));
     assert_eq!(s, "hllo");
-    assert_eq!(s.remove_char(10), None);
-  }
-
-  #[test]
-  fn test_remove_word_backwards() {
-    let mut pos = 11;
-    let mut s = String::from("hello world test");
-    s.remove_word_backwards(&mut pos); // Position after "world"
-    assert_eq!(s, "hello  test");
-    assert_eq!(pos, 6);
-  }
-
-  #[test]
-  fn test_remove_word_forwards() {
-    let mut s = String::from("hello world test");
-    s.remove_word_forwards(6); // Position at start of "world"
-    assert_eq!(s, "hello test");
+    assert_eq!(s.remove_char_at_byte(10), None);
   }
 
   #[test]
@@ -211,5 +124,42 @@ mod tests {
     assert_eq!(s.fuzzy_score("hlo"), 3);
     assert_eq!(s.fuzzy_score("hello"), 5);
     assert_eq!(s.fuzzy_score("xyz"), 0);
+  }
+
+  #[test]
+  fn test_insert_char_at_byte_utf8() {
+    let mut s = String::from("héllo");
+    // In "héllo", 'h' is at 0, 'é' is at 1-2, 'l' is at 3
+    s.insert_char_at_byte(3, 'X'); // Insert at byte position 3 (before first 'l')
+    assert_eq!(s, "héXllo");
+
+    let mut s = String::from("🚀test");
+    // In "🚀test", emoji is 4 bytes (0-3), 't' starts at 4
+    s.insert_char_at_byte(4, 'X'); // Insert after emoji (4 bytes)
+    assert_eq!(s, "🚀Xtest");
+  }
+
+  #[test]
+  fn test_remove_char_at_byte_utf8() {
+    let mut s = String::from("héllo");
+    // In "héllo", 'é' starts at byte 1
+    assert_eq!(s.remove_char_at_byte(1), Some('é')); // Remove é (2 bytes)
+    assert_eq!(s, "hllo");
+
+    let mut s = String::from("🚀test");
+    assert_eq!(s.remove_char_at_byte(0), Some('🚀')); // Remove emoji (4 bytes)
+    assert_eq!(s, "test");
+  }
+
+  #[test]
+  fn test_remove_char_at_byte_bounds() {
+    let mut s = String::from("test");
+    assert_eq!(s.remove_char_at_byte(4), None); // Out of bounds
+    assert_eq!(s.remove_char_at_byte(10), None); // Way out of bounds
+    
+    // Test removing from invalid byte position within UTF-8 character
+    let mut s = String::from("héllo");
+    // Byte 2 is in the middle of 'é' character, so it should return None
+    assert_eq!(s.remove_char_at_byte(2), None);
   }
 }

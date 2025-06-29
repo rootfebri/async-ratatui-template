@@ -38,7 +38,7 @@ impl<'s> Explorer<'s> {
     self
   }
   pub fn input_block(mut self, input_block: impl Into<Option<Block<'s>>>) -> Self {
-    self.file_block = input_block.into();
+    self.input_block = input_block.into();
     self
   }
 
@@ -62,21 +62,45 @@ impl<'s> Explorer<'s> {
 
   fn draw_input(&mut self) -> impl Widget {
     let input = self.state.input.as_str();
+    let cursor_byte_pos = self.state.cursor.min(input.len()); // Clamp cursor to valid range
     let mut spans = Line::default();
 
-    for (chrpos, (byte_pos, chr)) in input.char_indices().enumerate() {
-      if chrpos == self.state.cursor {
-        let highlighted = &input[byte_pos..byte_pos + chr.len_utf8()];
-        spans.push_span(Span::raw(highlighted).dark_gray().on_white());
+    if input.is_empty() {
+      // Show cursor in empty input
+      spans.push_span(Span::raw(" ").dark_gray().on_white());
+    } else if cursor_byte_pos >= input.len() {
+      // Cursor at end of string
+      spans.push_span(Span::raw(input));
+      spans.push_span(Span::raw(" ").dark_gray().on_white());
+    } else {
+      // Make sure cursor is at a valid character boundary
+      let adjusted_cursor = if input.is_char_boundary(cursor_byte_pos) {
+        cursor_byte_pos
       } else {
-        let normal = &input[byte_pos..byte_pos + chr.len_utf8()];
-        spans.push_span(Span::raw(normal));
+        // Find the next valid character boundary
+        (cursor_byte_pos..=input.len())
+          .find(|&pos| input.is_char_boundary(pos))
+          .unwrap_or(input.len())
+      };
+
+      // Render characters with cursor highlighting
+      for (byte_pos, chr) in input.char_indices() {
+        if byte_pos == adjusted_cursor {
+          // Highlight the character at cursor position
+          spans.push_span(Span::raw(chr.to_string()).dark_gray().on_white());
+        } else {
+          spans.push_span(Span::raw(chr.to_string()));
+        }
       }
     }
 
+    // Calculate scroll position based on cursor character position
+    let cursor_char_pos = input[..cursor_byte_pos.min(input.len())].chars().count();
+    let scroll_offset = cursor_char_pos.saturating_sub(10) as u16;
+
     Paragraph::new(spans)
       .wrap(Wrap { trim: true })
-      .scroll((0, self.state.cursor as u16))
+      .scroll((0, scroll_offset)) // Keep cursor visible with some padding
       .block(self.input_block.take().unwrap_or_else(|| self.give_input_block()))
   }
 
