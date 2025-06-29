@@ -91,15 +91,11 @@ async fn parent_content_scanner(mut cur_parent_rx: watch::Receiver<Option<PathBu
 async fn child_content_scanner(mut cur_child_tx: watch::Receiver<Option<ExplorerContent>>) {
   let mut ch = cur_child_tx.borrow_and_update().clone();
 
-  let scanner = async |ch: Option<&ExplorerContent>| {
+  async fn scanner(ch: Option<&ExplorerContent>) {
     if let Some(exc) = ch {
       exc.auto_load().await;
-    } else {
-      loop {
-        ::tokio::time::sleep(tokio::time::Duration::from_secs(30)).await
-      }
     }
-  };
+  }
 
   async fn watcher(watcher: &mut watch::Receiver<Option<ExplorerContent>>, ch: &Option<ExplorerContent>) {
     _ = watcher.wait_for(|cur| cur != ch).await;
@@ -107,7 +103,7 @@ async fn child_content_scanner(mut cur_child_tx: watch::Receiver<Option<Explorer
 
   loop {
     select! {
-      _ = scanner(ch.as_ref()) => {},
+      _ = scanner(ch.as_ref()) => tokio::time::sleep(tokio::time::Duration::from_millis(10)).await,
       _ = watcher(&mut cur_child_tx, &ch) => ch = cur_child_tx.borrow().clone(),
     }
   }

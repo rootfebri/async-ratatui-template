@@ -10,6 +10,8 @@ use std::ops::DerefMut;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::fs::File;
+use tokio::io::{AsyncBufReadExt, BufReader, Lines};
 use tokio::sync::RwLock;
 
 use super::*;
@@ -145,7 +147,7 @@ impl<'s> Explorer<'s> {
   fn draw_preview(&mut self) -> impl Widget {
     let block = self.preview_block();
     if let Some(ref selected_content) = self.selected_content {
-      selected_content.as_preview().block(block)
+      selected_content.as_preview().block(block).wrap(Wrap { trim: false }).left_aligned()
     } else {
       Paragraph::new("").block(block)
     }
@@ -183,7 +185,7 @@ pub enum ExplorerContent {
   },
   File {
     path: Arc<Path>,
-    content: Arc<RwLock<Vec<u8>>>,
+    content: Arc<RwLock<String>>,
     state: Arc<RwLock<ExplorerContentState>>,
   },
 }
@@ -226,37 +228,45 @@ impl ExplorerContent {
     spans.into()
   }
 
-  pub async fn auto_load(&self) -> ! {
+  pub async fn open_lines_buffered(&self) -> Option<Lines<BufReader<File>>> {
+    let ExplorerContent::File { ref path, .. } = *self else { return None };
+    let file = File::open(path).await.ok()?;
+    Some(BufReader::new(file).lines())
+  }
+
+  async fn never() -> ! {
+    loop {
+      tokio::time::sleep(tokio::time::Duration::from_secs(39)).await
+    }
+  }
+
+  pub async fn auto_load(&self) {
     let Self::File { ref state, ref content, .. } = *self else {
-      loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(39)).await
-      }
+      Self::never().await
     };
-    let mut state = state.write().await;
+
     'main: loop {
+      let mut state = state.write().await;
       match state.deref_mut() {
-        ExplorerContentState::Start => match CharStream::new(self.as_path()).await {
-          Ok(stream) => *state = ExplorerContentState::LinesBuffer(stream),
-          Err(_) => *state = ExplorerContentState::Done,
-        },
-        ExplorerContentState::LinesBuffer(stream) => loop {
-          if let Ok(Some(c)) = stream.next_char().await {
-            let mut buf = [0u8; 4];
-            let encoded = c.encode_utf8(&mut buf);
-            content.write().await.extend_from_slice(encoded.as_bytes());
+        ExplorerContentState::Start => {
+          if let Some(stream) = self.open_lines_buffered().await {
+            *state = ExplorerContentState::LinesBuffer(Box::from(stream));
+          } else {
+            *state = ExplorerContentState::Done;
+          }
+        }
+        ExplorerContentState::LinesBuffer(stream) => {
+          if let Ok(Some(ref str)) = stream.next_line().await {
+            content.write().await.push_str(str);
+            content.write().await.push('\n');
+            continue 'main;
           } else {
             *state = ExplorerContentState::Done;
             continue 'main;
           }
-        },
+        }
         ExplorerContentState::Done => break,
       }
-    }
-
-    drop(state);
-
-    loop {
-      tokio::time::sleep(tokio::time::Duration::from_secs(39)).await
     }
   }
 
@@ -270,15 +280,17 @@ impl ExplorerContent {
     }
   }
 
-  pub fn content(&self) -> Cow<'_, str> {
+  pub fn content(&self) -> String {
+    std::thread::sleep(std::time::Duration::from_millis(1));
+
     match *self {
-      ExplorerContent::Dir { .. } => String::from_utf8_lossy(self.as_path().as_os_str().as_encoded_bytes()),
-      ExplorerContent::File { ref content, .. } => String::from_utf8_lossy(content.blocking_read().as_slice()).into_owned().into(),
+      ExplorerContent::Dir { .. } => String::new(),
+      ExplorerContent::File { ref content, .. } => content.blocking_read().clone(),
     }
   }
 
   pub fn as_preview(&self) -> Paragraph {
-    let content = Line::from(self.content()).centered().fg(Color::LightBlue);
+    let content = Line::from(self.content()).fg(Color::White);
     Paragraph::new(content)
   }
 
@@ -311,6 +323,6 @@ impl Eq for ExplorerContent {}
 pub enum ExplorerContentState {
   #[default]
   Start,
-  LinesBuffer(CharStream),
+  LinesBuffer(Box<Lines<BufReader<File>>>),
   Done,
 }
