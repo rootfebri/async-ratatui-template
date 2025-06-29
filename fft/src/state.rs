@@ -6,27 +6,29 @@ use ratatui::widgets::ListState;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::watch::Receiver;
-use tokio::sync::{RwLock, mpsc, watch};
+use tokio::sync::{RwLock, watch};
 use tokio::time::sleep;
 use widget::ExplorerContent;
 
 impl Default for ExplorerState {
   fn default() -> Self {
+    let list: Arc<RwLock<Vec<ExplorerContent>>> = Default::default();
     let cwd = PathBuf::from("./");
     let (channels, new_channels) = Channels::new();
-    channels.current_parrent_tx.send(Some(cwd.clone())).unwrap();
 
-    let runners = Runner::new(new_channels);
+    // Send the initial directory to trigger scanning
+    _ = channels.current_parrent_tx.send(Some(cwd.clone()));
+
+    let runners = Runner::new(new_channels, list.clone());
 
     Self {
       runners,
       channels,
       cursor: 0,
-      input: "".to_string(),
+      input: String::new(),
       cwd,
-      list: Arc::new(Default::default()),
+      list,
       list_state: ListState::default(),
     }
   }
@@ -47,16 +49,6 @@ pub struct ExplorerState {
 }
 
 impl ExplorerState {
-  async fn sync_list(&mut self) {
-    if self.channels.mpsc_list.is_empty() {
-      self
-        .channels
-        .mpsc_list
-        .recv_many(self.list.write().await.as_mut(), self.channels.mpsc_list.len())
-        .await;
-    }
-  }
-
   async fn update_watched_child(&mut self) {
     let selected_content = self.selected_content().await;
     self
@@ -67,20 +59,24 @@ impl ExplorerState {
 
   async fn update_watched_cwd(&mut self) {
     self.channels.current_child_tx.send_modify(|current_child| _ = current_child.take());
-    self.channels.mpsc_list.recv_many(&mut vec![], self.channels.mpsc_list.len()).await;
-    self.list.write().await.clear();
+
+    // Notify the scanner of the new current working directory
     self
       .channels
       .current_parrent_tx
       .send_modify(|current_cwd| *current_cwd = Some(self.cwd.clone()));
 
+    // Give the scanner a moment to start processing
     sleep(Duration::from_millis(16)).await;
 
-    self.sync_list().await;
+    // Sync the new list contents and ensure selection
+    self.ensure_selection().await;
+
+    // Update the selected child if we have items
     let selected_child = if let Some(i) = self.list_state.selected() {
       self.read_items().await.get(i).cloned()
     } else {
-      return;
+      None
     };
 
     self
@@ -96,12 +92,12 @@ impl ExplorerState {
   pub fn handle_paste(&mut self, content: &str) -> RenderEvent {
     // Ensure cursor is at a valid position
     self.normalize_cursor();
-    
+
     // Insert at current byte position
     if self.input.is_char_boundary(self.cursor) {
       self.input.insert_str(self.cursor, content);
       self.cursor += content.len();
-      
+
       // Normalize cursor after insertion
       self.normalize_cursor();
     }
@@ -110,7 +106,7 @@ impl ExplorerState {
   }
 
   pub async fn handle_key(&mut self, event: KeyEvent) -> Option<RenderEvent> {
-    self.sync_list().await;
+    self.ensure_selection().await;
 
     match event {
       keys!(Up, NONE, Press) => {
@@ -260,7 +256,7 @@ impl ExplorerState {
     // If we're at the end or on whitespace, move back to find non-whitespace
     if char_pos > 0 {
       char_pos -= 1;
-      
+
       // Skip any trailing whitespace
       while char_pos > 0 && chars[char_pos].is_whitespace() {
         char_pos -= 1;
@@ -270,7 +266,7 @@ impl ExplorerState {
       while char_pos > 0 && !chars[char_pos].is_whitespace() {
         char_pos -= 1;
       }
-      
+
       // If we stopped on whitespace, move forward to the start of the word
       if char_pos > 0 && chars[char_pos].is_whitespace() {
         char_pos += 1;
@@ -321,7 +317,7 @@ impl ExplorerState {
     if self.cursor == 0 {
       return;
     }
-    
+
     // Find the start of the previous character
     let mut new_cursor = self.cursor - 1;
     while new_cursor > 0 && !self.input.is_char_boundary(new_cursor) {
@@ -335,7 +331,7 @@ impl ExplorerState {
     if self.cursor >= self.input.len() {
       return;
     }
-    
+
     // Find the start of the next character
     let mut new_cursor = self.cursor + 1;
     while new_cursor < self.input.len() && !self.input.is_char_boundary(new_cursor) {
@@ -362,7 +358,7 @@ impl ExplorerState {
 
     let chars: Vec<char> = self.input.chars().collect();
     let mut char_pos = self.input[..self.cursor].chars().count();
-    
+
     // Skip any trailing whitespace at cursor
     while char_pos > 0 && chars[char_pos - 1].is_whitespace() {
       char_pos -= 1;
@@ -385,7 +381,7 @@ impl ExplorerState {
 
     let chars: Vec<char> = self.input.chars().collect();
     let mut char_pos = self.input[..self.cursor].chars().count();
-    
+
     // Skip any leading whitespace at cursor
     while char_pos < chars.len() && chars[char_pos].is_whitespace() {
       char_pos += 1;
@@ -413,7 +409,7 @@ impl ExplorerState {
     if self.cursor == 0 {
       return;
     }
-    
+
     // Find the start of the character before cursor
     let mut char_start = self.cursor - 1;
     while char_start > 0 && !self.input.is_char_boundary(char_start) {
@@ -428,7 +424,7 @@ impl ExplorerState {
     if self.cursor >= self.input.len() {
       return;
     }
-    
+
     // Find the end of the character at cursor
     let mut char_end = self.cursor + 1;
     while char_end < self.input.len() && !self.input.is_char_boundary(char_end) {
@@ -465,32 +461,46 @@ impl ExplorerState {
         .unwrap_or(self.input.len());
     }
   }
+
+  /// Ensure we have a valid selection when items are available
+  async fn ensure_selection(&mut self) {
+    if self.list_state.selected().is_none() {
+      // If no selection and we have items, select the first one
+      if !self.read_items().await.is_empty() {
+        self.list_state.select(Some(0));
+      }
+    }
+  }
+
+  /// Debug method to check the current state of the list
+  #[allow(dead_code)]
+  pub fn debug_list_state(&self) -> (usize, usize, bool) {
+    let list = self.list.blocking_read();
+    let filtered_count = self.blocking_read_items().len();
+    let has_selection = self.list_state.selected().is_some();
+    (list.len(), filtered_count, has_selection)
+  }
 }
 
 pub struct Channels {
   pub(super) current_parrent_tx: watch::Sender<Option<PathBuf>>,
   pub(super) current_child_tx: watch::Sender<Option<ExplorerContent>>,
-  pub(super) mpsc_list: mpsc::Receiver<ExplorerContent>,
 }
 pub struct NewChannels {
-  pub list: Sender<ExplorerContent>,
   pub parrent_watch: Receiver<Option<PathBuf>>,
   pub child_watch: Receiver<Option<ExplorerContent>>,
 }
 
 impl Channels {
   pub fn new() -> (Channels, NewChannels) {
-    let (list_tx, mpsc_list) = mpsc::channel(1024);
     let (current_parrent_tx, current_parrent_rx) = watch::channel(Option::<PathBuf>::None);
     let (current_child_tx, current_child_rx) = watch::channel(Option::<ExplorerContent>::None);
     (
       Self {
         current_parrent_tx,
-        mpsc_list,
         current_child_tx,
       },
       NewChannels {
-        list: list_tx,
         parrent_watch: current_parrent_rx,
         child_watch: current_child_rx,
       },

@@ -1,13 +1,14 @@
 use devicons::FileIcon;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect, Spacing};
-use ratatui::style::{Color, Stylize};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, StatefulWidget, Widget, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, HighlightSpacing, List, ListItem, Paragraph, Widget, Wrap};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ops::DerefMut;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -46,10 +47,13 @@ impl<'s> Explorer<'s> {
     self
       .state
       .blocking_read_items()
-      .into_iter()
+      .iter()
       .map(|item| ListItem::new(item.apply_colors(self.state.input.as_str())))
       .collect::<List>()
       .block(self.file_block.take().unwrap_or_else(|| self.give_file_block()))
+      .highlight_spacing(HighlightSpacing::Always)
+      .highlight_style(Style::new().bg(Color::Rgb(131, 164, 150)))
+      .highlight_symbol(">")
   }
 
   fn give_file_block(&self) -> Block<'static> {
@@ -155,15 +159,15 @@ fn center_constraints(area: Rect, w: Constraint, h: Constraint) -> Rect {
 
 impl Widget for Explorer<'_> {
   fn render(mut self, area: Rect, buf: &mut Buffer) {
-    let area = center_constraints(area, Constraint::Percentage(80), Constraint::Max(10));
+    let area = center_constraints(area, Constraint::Percentage(80), Constraint::Percentage(90));
     let [left, content_area] = Layout::horizontal([Constraint::Fill(1); 2]).spacing(Spacing::Space(1)).areas::<2>(area);
     let [file_area, input_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(3)])
       .spacing(Spacing::Space(1))
       .areas::<2>(left);
 
-    // clear(content_area, buf);
-    // clear(file_area, buf);
-    // clear(input_area, buf);
+    Clear.render(content_area, buf);
+    Clear.render(file_area, buf);
+    Clear.render(input_area, buf);
 
     self.draw_filetree().render(file_area, buf);
     self.draw_input().render(input_area, buf);
@@ -185,19 +189,30 @@ pub enum ExplorerContent {
 }
 
 impl ExplorerContent {
-  pub fn icon(&self) -> FileIcon {
-    FileIcon::from(self.as_path())
+  pub fn icon(&self) -> Span<'static> {
+    let fileicon = FileIcon::from(self.as_path());
+    let color = Color::from_str(fileicon.color).unwrap_or(Color::Reset);
+    let icon = fileicon.icon.to_string();
+
+    Span::raw(icon).fg(color)
   }
 
   pub fn apply_colors(&self, input: &str) -> Line<'static> {
+    let icon = self.icon();
     if input.is_empty() {
-      return self.as_cow().to_string().into();
-    }
+      let mut line = Line::default();
+      line.push_span(icon);
+      line.push_span(Span::raw(" "));
+      line.push_span(Span::raw(self.as_cow().to_string()).white());
 
-    let mut spans: Vec<Span> = vec![Span::raw(self.icon().icon.to_string()), Span::raw(" ")];
+      return line;
+    };
+
+    let mut spans: Vec<Span> = vec![icon, Span::raw(" ")];
 
     let path_str = self.as_cow();
     let input_chars: Vec<_> = input.chars().collect();
+
     for chr in path_str.chars() {
       let span = Span::raw(chr.to_string());
 
@@ -262,27 +277,9 @@ impl ExplorerContent {
     }
   }
 
-  pub fn as_item(&self) -> ListItem {
-    let path: Cow<'_, str> = match *self {
-      ExplorerContent::Dir { ref path, .. } | ExplorerContent::File { ref path, .. } => String::from_utf8_lossy(path.as_os_str().as_encoded_bytes()),
-    };
-
-    ListItem::new(path)
-  }
-
   pub fn as_preview(&self) -> Paragraph {
     let content = Line::from(self.content()).centered().fg(Color::LightBlue);
     Paragraph::new(content)
-  }
-
-  pub fn as_static_list_item(&self) -> ListItem<'static> {
-    let path_str = self.as_cow().into_owned();
-    let file_icon = FileIcon::from(self.as_path());
-    let line = [Span::raw(file_icon.icon.to_string()), Span::raw(" "), Span::raw(path_str)]
-      .into_iter()
-      .collect::<Line>();
-
-    ListItem::new(line)
   }
 
   pub fn as_cow(&self) -> Cow<'_, str> {
@@ -316,20 +313,4 @@ pub enum ExplorerContentState {
   Start,
   LinesBuffer(CharStream),
   Done,
-}
-
-impl StatefulWidget for ExplorerContent {
-  type State = (u16, u16);
-  fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-    let border = Block::bordered()
-      .border_type(BorderType::Rounded)
-      .fg(Color::Rgb(0, 255, 251))
-      .title_top(" File Content Preview ");
-
-    Paragraph::new(self.content())
-      .block(border)
-      .wrap(Wrap { trim: false })
-      .scroll(*state)
-      .render(area, buf);
-  }
 }

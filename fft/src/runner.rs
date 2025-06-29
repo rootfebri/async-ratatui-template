@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::fs::read_dir;
 use tokio::select;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{RwLock, watch};
 use tokio::task::JoinHandle;
 
 use super::state::NewChannels;
@@ -15,32 +15,40 @@ pub struct Runner {
   list_handle: JoinHandle<()>,
 }
 
+macro_rules! never {
+  () => {
+    loop {
+      ::tokio::time::sleep(tokio::time::Duration::from_secs(30)).await
+    }
+  };
+}
+
 macro_rules! value_or_never {
   ($result:expr) => {
     match $result {
       Ok(result) => result,
-      Err(_) => loop {
-        ::tokio::time::sleep(tokio::time::Duration::from_secs(30)).await
-      },
+      Err(_) => never!(),
     }
   };
 }
 
 impl Runner {
-  pub fn new(new_channels: NewChannels) -> Self {
-    let cwd_handle = tokio::spawn(parent_content_scanner(new_channels.parrent_watch, new_channels.list));
+  pub fn new(new_channels: NewChannels, tree: Arc<RwLock<Vec<ExplorerContent>>>) -> Self {
+    let cwd_handle = tokio::spawn(parent_content_scanner(new_channels.parrent_watch, tree));
     let list_handle = tokio::spawn(child_content_scanner(new_channels.child_watch));
     Self { cwd_handle, list_handle }
   }
 }
 
-async fn parent_content_scanner(mut cur_parent_rx: watch::Receiver<Option<PathBuf>>, list_tx: mpsc::Sender<ExplorerContent>) {
-  let mut parent = None;
+async fn parent_content_scanner(mut cur_parent_rx: watch::Receiver<Option<PathBuf>>, tree: Arc<RwLock<Vec<ExplorerContent>>>) {
+  // Initialize with the current value from the watch channel
+  let mut parent = cur_parent_rx.borrow().clone();
 
-  async fn scanner(path: &Option<PathBuf>, list_tx: &mpsc::Sender<ExplorerContent>) -> ! {
+  async fn scanner(path: &Option<PathBuf>, cwd_list: &RwLock<Vec<ExplorerContent>>) {
     if let Some(path) = path
       && path.is_dir()
     {
+      cwd_list.write().await.clear();
       let mut readdir = value_or_never!(read_dir(path).await);
 
       while let Some(entry) = value_or_never!(readdir.next_entry().await) {
@@ -56,22 +64,26 @@ async fn parent_content_scanner(mut cur_parent_rx: watch::Receiver<Option<PathBu
           }
         };
 
-        list_tx.send(child).await.unwrap();
+        cwd_list.write().await.push(child);
       }
-    }
-    loop {
-      ::tokio::time::sleep(tokio::time::Duration::from_secs(30)).await
+
+      never!()
     }
   }
 
-  async fn watcher(watcher: &mut watch::Receiver<Option<PathBuf>>, current: &Option<PathBuf>) {
-    _ = watcher.wait_for(|cur| cur.as_ref() != current.as_ref()).await;
+  async fn watcher(watcher: &mut watch::Receiver<Option<PathBuf>>, current: &Option<PathBuf>) -> bool {
+    let current_canon = current.as_deref().map(Path::canonicalize).and_then(Result::ok);
+    watcher
+      .wait_for(|cur| cur.as_deref().map(Path::canonicalize).and_then(Result::ok) != current_canon)
+      .await
+      .is_ok()
   }
 
   loop {
     select! {
-      _ = scanner(&parent, &list_tx) => {},
-      _ = watcher(&mut cur_parent_rx, &parent) => parent = cur_parent_rx.borrow().clone(),
+      _ = scanner(&parent, &tree) => {},
+      true = watcher(&mut cur_parent_rx, &parent) => parent = cur_parent_rx.borrow().clone(),
+      else => break
     }
   }
 }

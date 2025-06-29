@@ -1,4 +1,4 @@
-use crate::ui::{center_constraints, clear, fix_center};
+use crate::ui::{center_constraints, fix_center};
 use crate::widgets::{Alert, Input};
 use crossterm::event::Event;
 use fft::state::ExplorerState;
@@ -54,7 +54,6 @@ impl Widget for &Popup {
     Self: Sized,
   {
     let area = self.area(area);
-    clear(area, buf);
 
     match self {
       Popup::Input(widget) => widget.render(area, buf),

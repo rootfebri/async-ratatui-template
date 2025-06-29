@@ -38,12 +38,12 @@ async fn main() -> anyhow::Result<()> {
   let mut app = App::default();
   let mut app_event = app.subscribe_event();
   // Initiate first render
-  block_in_place(|| terminal.draw(|frame| frame.render_widget(&app, frame.area())))?;
+  terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
 
   while status.is_ok() && !SYNC_STATE.is_exiting() {
     let handled = select! {
       _ = fps.tick() => {
-        block_in_place(|| terminal.draw(|frame| frame.render_widget(&app, frame.area())))?;
+        terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
         continue;
       },
       _ = app_event.changed() =>  app_event.borrow_and_update().clone(),
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if handled.kind.is_render() {
-      block_in_place(|| terminal.draw(|frame| frame.render_widget(&app, frame.area())))?;
+      terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
     } else if handled.kind.is_handled() {
       break;
     } else if handled.kind.is_warn() {
