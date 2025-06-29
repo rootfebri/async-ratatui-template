@@ -1,5 +1,5 @@
 use crossterm::event::Event;
-use helper::{UnhandledEvent, keys};
+use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Stylize, Widget};
@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Paragraph};
 
 use crate::Area;
 use crate::areas::KnownArea;
-use crate::ui::blk;
+use crate::ui::{blk, clear};
 
 #[derive(Debug)]
 pub struct Input {
@@ -30,11 +30,11 @@ impl Input {
       known_area: Default::default(),
     }
   }
-  pub fn handle_event(&mut self, event: &Event) -> Option<UnhandledEvent> {
+  pub fn handle_event(&mut self, event: &Event) -> Option<RenderEvent> {
     match event {
       Event::Key(keys!(Backspace, NONE, Press)) => {
         if self.cursor == 0 || self.value.is_empty() {
-          return Some(UnhandledEvent::no_ops());
+          return Some(RenderEvent::no_ops());
         }
 
         // Convert to char indices for proper Unicode handling
@@ -45,11 +45,11 @@ impl Input {
           self.cursor -= 1;
         }
 
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       Event::Key(keys!(Delete, NONE, Press)) => {
         if self.value.is_empty() {
-          return Some(UnhandledEvent::no_ops());
+          return Some(RenderEvent::no_ops());
         }
 
         let mut chars: Vec<char> = self.value.chars().collect();
@@ -58,36 +58,36 @@ impl Input {
           self.value = chars.into_iter().collect();
         }
 
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
-      Event::Key(keys!(Enter, NONE, Press)) => Some(UnhandledEvent::handled()),
-      Event::Key(keys!(Esc, NONE, Press)) => Some(UnhandledEvent::canceled()),
+      Event::Key(keys!(Enter, NONE, Press)) => Some(RenderEvent::handled()),
+      Event::Key(keys!(Esc, NONE, Press)) => Some(RenderEvent::canceled()),
       Event::Key(keys!(Left, NONE, Press)) => {
         self.cursor = self.cursor.saturating_sub(1);
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       Event::Key(keys!(Right, NONE, Press)) => {
         let max_cursor = self.value.chars().count();
         if self.cursor < max_cursor {
           self.cursor += 1;
         }
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       Event::Key(keys!(Home, NONE, Press)) => {
         self.cursor = 0;
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       Event::Key(keys!(End, NONE, Press)) => {
         self.cursor = self.value.chars().count();
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       Event::Key(keys!(Char(chr), NONE, Press)) => {
         self.insert_char(*chr);
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       Event::Paste(content) => {
         self.paste(content);
-        Some(UnhandledEvent::render())
+        Some(RenderEvent::render())
       }
       _ => None,
     }
@@ -229,6 +229,7 @@ impl Widget for &Input {
   where
     Self: Sized,
   {
+    clear(area, buf);
     self.known_area.replace(area);
     self.draw_input(area, buf)
   }

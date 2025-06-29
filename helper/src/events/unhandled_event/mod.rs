@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 
 macro_rules! impl_variants {
     ($vi:vis, $variant:ident, $event:ident$(($($parname:ident:$partype:ty),*))? $(,)?) => {
-      impl $crate::UnhandledEvent {
+      impl $crate::RenderEvent {
         $vi fn $variant($($($parname: $partype),+)?) -> Self {
           Self {kind: $crate::EventKind::$event$(($($parname),+))?, event_time: Instant::now()}
         }
@@ -22,7 +22,7 @@ impl_variants!(pub, warn, Warn(v: Span<'static>));
 mod event;
 pub use event::EventKind;
 
-impl Default for UnhandledEvent {
+impl Default for RenderEvent {
   fn default() -> Self {
     Self {
       kind: EventKind::NoOps,
@@ -32,12 +32,16 @@ impl Default for UnhandledEvent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UnhandledEvent {
+pub struct RenderEvent {
   pub kind: EventKind,
   event_time: Instant,
 }
 
-impl UnhandledEvent {
+impl RenderEvent {
+  pub fn as_handled(&mut self) {
+    self.kind = EventKind::Handled;
+    self.event_time = Instant::now();
+  }
   pub fn modify_60fps(&mut self, new: Self) -> bool {
     if self.fps_60() {
       *self = new;
@@ -107,7 +111,7 @@ impl UnhandledEvent {
   }
 }
 
-impl From<std::io::Error> for UnhandledEvent {
+impl From<std::io::Error> for RenderEvent {
   fn from(error: std::io::Error) -> Self {
     Self::new(EventKind::Error(Span::from(error.kind().to_string())))
   }

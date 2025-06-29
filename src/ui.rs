@@ -1,3 +1,4 @@
+use crate::Area;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Stylize};
@@ -6,6 +7,14 @@ use ratatui::widgets::{Block, BorderType, Clear, Widget};
 pub fn fix_center(area: Rect, w: u16, h: u16) -> Rect {
   let [_, x, _] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(w), Constraint::Fill(1)]).areas(area);
   Layout::vertical([Constraint::Fill(1), Constraint::Length(h), Constraint::Fill(1)]).split(x)[1]
+}
+
+#[allow(clippy::needless_return)]
+pub fn center_constraints(area: Area, w: Constraint, h: Constraint) -> Area {
+  let [_, w, _] = Layout::horizontal([Constraint::Fill(1), w, Constraint::Fill(1)]).areas(area);
+  let [_, h, _] = Layout::vertical([Constraint::Fill(1), h, Constraint::Fill(1)]).areas(w);
+
+  return h;
 }
 
 pub fn clear(area: Rect, buffer: &mut Buffer) {

@@ -1,25 +1,22 @@
 use std::io::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
-use helper::UnhandledEvent;
+use helper::RenderEvent;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::watch::Sender;
-use tokio::time::sleep;
 use tokio::{fs, select};
 
-use crate::app::{MpscTx, State, WatchRx};
-use crate::never;
+use crate::app::{MpscTx, WatchRx};
 use crate::widgets::{Log, Logs, Statistic};
+use crate::{never, wait_process};
 
 pub async fn input_reader(
   line_tx: MpscTx<Arc<str>>,
   mut watched_input: WatchRx<PathBuf>,
-  event: Sender<UnhandledEvent>,
+  event: Sender<RenderEvent>,
   logs: Logs,
   statistic: Statistic,
-  state_watcher: WatchRx<State>,
 ) {
   let info = format!("Input reader spawn with `{}` value", watched_input.borrow_and_update().display());
   logs.add(Log::info(info)).await;
@@ -29,19 +26,13 @@ pub async fn input_reader(
   loop {
     select! {
       new_input = watched_input.wait_for(|current| *current != input) => input = new_input.unwrap().clone(),
-      _ = read(&input, &line_tx, &event, logs.clone(), statistic.clone(), &state_watcher) => {}
+      _ = read(&input, &line_tx, &event, logs.clone(), statistic.clone()) => {}
     }
   }
 }
 
-pub async fn read(
-  path: impl AsRef<Path>,
-  sender: &MpscTx<Arc<str>>,
-  event: &Sender<UnhandledEvent>,
-  logs: Logs,
-  statistic: Statistic,
-  state_watcher: &WatchRx<State>,
-) -> Result<()> {
+pub async fn read(path: impl AsRef<Path>, sender: &MpscTx<Arc<str>>, event: &Sender<RenderEvent>, logs: Logs, statistic: Statistic) -> Result<()> {
+  wait_process!();
   let info = format!("Input reader started reading `{}`", path.as_ref().display());
   logs.add(Log::info(info)).await;
 
@@ -49,7 +40,7 @@ pub async fn read(
     Ok(file) => file,
     Err(err) => {
       logs.add(Log::error(err)).await;
-      event.send_modify(|e| *e = UnhandledEvent::render());
+      event.send_modify(|e| *e = RenderEvent::render());
       never!();
     }
   };
@@ -61,13 +52,13 @@ pub async fn read(
       statistic.set_current(0);
       if let Err(err) = file.rewind().await {
         logs.add(Log::error(err)).await;
-        event.send_modify(|e| *e = UnhandledEvent::render());
+        event.send_modify(|e| *e = RenderEvent::render());
         never!()
       }
     }
     Err(err) => {
       logs.add(Log::error(err)).await;
-      event.send_modify(|e| *e = UnhandledEvent::render());
+      event.send_modify(|e| *e = RenderEvent::render());
       never!()
     }
   }
@@ -75,10 +66,7 @@ pub async fn read(
   let mut lines = BufReader::new(file).lines();
 
   loop {
-    let true = state_watcher.borrow().is_processing() else {
-      sleep(Duration::from_millis(16)).await;
-      continue;
-    };
+    wait_process!();
 
     match lines.next_line().await {
       Ok(None) => break,
@@ -87,11 +75,12 @@ pub async fn read(
         if line.is_empty() {
           continue;
         } else if let Err(err) = sender.send(line.into()).await {
-          event.send_modify(|e| *e = UnhandledEvent::error(err.to_string().into()));
+          logs.add(Log::error(err)).await;
         }
       }
-      Err(err) => event.send_modify(|e| *e = UnhandledEvent::from(err)),
+      Err(err) => event.send_modify(|e| *e = RenderEvent::from(err)),
     }
+    event.send_modify(|e| *e = RenderEvent::render());
   }
 
   let info = format!("Input reader finished reading `{}`", path.as_ref().display());

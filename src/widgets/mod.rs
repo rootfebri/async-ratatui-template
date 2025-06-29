@@ -7,9 +7,6 @@ pub use statistic::*;
 mod logs;
 pub use logs::*;
 
-mod confirmation;
-pub use confirmation::*;
-
 mod alert;
 pub use alert::*;
 

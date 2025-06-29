@@ -1,4 +1,4 @@
-use helper::UnhandledEvent;
+use helper::RenderEvent;
 
 use super::*;
 use crate::app::app_::impls::checker::line_checker;
@@ -10,12 +10,11 @@ impl Default for App {
   fn default() -> Self {
     let logs: Logs = Default::default();
     let mut tasks = JoinSet::<()>::new();
-    let event_watcher: WatchTx<UnhandledEvent> = WatchTx::default();
-    let (line_tx @ MpscTx { .. }, line_rx @ MpscRx { .. }) = mpsc::channel(1);
-    let (bucket_tx @ MpscTx { .. }, bucket_rx @ MpscRx { .. }) = mpsc::channel(1024);
+    let event_watcher: WatchTx<RenderEvent> = WatchTx::default();
+    let (line_tx, line_rx) = mpsc::channel(1);
+    let (recorder, records) = mpsc::channel(1024);
     let output_tx = WatchTx::new(Default::default());
     let input_tx = WatchTx::new(Default::default());
-    let state_tx = WatchTx::new(State::Iddling);
     let statistic = Statistic::new("Processing Domains");
 
     tasks.spawn(input_reader(
@@ -24,26 +23,12 @@ impl Default for App {
       event_watcher.clone(),
       logs.clone(),
       statistic.clone(),
-      state_tx.subscribe(),
-    ));
-    tasks.spawn(line_checker(
-      line_rx,
-      bucket_tx,
-      event_watcher.clone(),
-      logs.clone(),
-      statistic.clone(),
-      state_tx.subscribe(),
-    ));
-    tasks.spawn(output_writer(
-      bucket_rx,
-      output_tx.subscribe(),
-      event_watcher.clone(),
-      logs.clone(),
-      state_tx.subscribe(),
     ));
 
+    tasks.spawn(line_checker(line_rx, recorder, event_watcher.clone(), logs.clone(), statistic.clone()));
+    tasks.spawn(output_writer(records, output_tx.subscribe(), event_watcher.clone(), logs.clone()));
+
     Self {
-      state: State::Iddling,
       popup: None,
       input: None,
       output: None,
@@ -52,7 +37,6 @@ impl Default for App {
       event_watcher,
       output_tx,
       input_tx,
-      state_tx,
       focus: true,
       scrols: ScrollStates::default(),
       logs,

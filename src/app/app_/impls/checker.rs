@@ -1,47 +1,54 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use helper::UnhandledEvent;
-use tokio::time::sleep;
+use helper::RenderEvent;
 
-use crate::app::handler::BucketStatus;
-use crate::app::{MpscRx, MpscTx, State, WatchRx, WatchTx};
+use crate::app::handler::sectrails::SecTrailClient;
+use crate::app::handler::sectrails::jsons::Record;
+use crate::app::{MpscRx, MpscTx, WatchTx};
 use crate::widgets::{Log, Logs, Statistic};
+use crate::{never, wait_process};
 
-pub async fn line_checker(
-  mut line_rx: MpscRx<Arc<str>>,
-  bucket_tx: MpscTx<BucketStatus>,
-  event: WatchTx<UnhandledEvent>,
-  logs: Logs,
-  statistic: Statistic,
-  state_watcher: WatchRx<State>,
-) {
+pub async fn line_checker(mut line_rx: MpscRx<Arc<str>>, bucket_tx: MpscTx<Record>, event: WatchTx<RenderEvent>, logs: Logs, statistic: Statistic) {
+  let mut sectrail = SecTrailClient::new();
+
   while let Some(line) = line_rx.recv().await {
-    while !state_watcher.borrow().is_processing() {
-      sleep(Duration::from_millis(16)).await
-    }
-    check(line, bucket_tx.clone(), event.clone(), logs.clone(), statistic.clone()).await;
+    wait_process!();
+    check(&mut sectrail, &line, &bucket_tx, &event, &logs, &statistic).await;
   }
 }
 
-pub async fn check(domain: Arc<str>, bucket_tx: MpscTx<BucketStatus>, event: WatchTx<UnhandledEvent>, logs: Logs, statistic: Statistic) {
-  match BucketStatus::new(domain).await {
-    Ok(status) => match bucket_tx.send(status.clone()).await {
-      Ok(_) => {
-        logs.add(Log::bucket(status)).await;
-        statistic.increment();
-        event.send_modify(|e| *e = UnhandledEvent::render());
+pub async fn check(
+  sectrail: &mut SecTrailClient,
+  line: &str,
+  recorder: &MpscTx<Record>,
+  event: &WatchTx<RenderEvent>,
+  logs: &Logs,
+  statistic: &Statistic,
+) {
+  logs.add(Log::info(format!("Entering new SecTrail Sequence => Data = {line}"))).await;
+
+  let mut _total_data_sequence = 0;
+  sectrail.new_sequence(line);
+  loop {
+    match sectrail.get().await {
+      Ok(response) if response.as_records().is_empty() => break,
+      Ok(response) => {
+        let records = response.into_records();
+        _total_data_sequence += records.len();
+        for record in records {
+          logs.add(Log::record(record.clone())).await;
+          recorder.send(record).await.unwrap();
+        }
       }
       Err(err) => {
         logs.add(Log::error(err)).await;
-        statistic.increment();
-        event.send_modify(|e| *e = UnhandledEvent::render());
+        event.send(RenderEvent::handled()).unwrap();
+
+        never!();
       }
-    },
-    Err(err) => {
-      logs.add(Log::error(err)).await;
-      statistic.increment();
-      event.send_modify(|e| *e = UnhandledEvent::render());
     }
   }
+
+  logs.info(format!("Added {_total_data_sequence} records from `{line}`")).await;
+  statistic.increment();
 }

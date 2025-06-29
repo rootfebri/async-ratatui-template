@@ -1,35 +1,32 @@
-use std::collections::BTreeMap;
+use std::io::stdout;
 use std::process::Stdio;
 
 use anyhow::{Result, bail};
+use reqwest::header::HeaderMap;
 use serde::Deserialize;
 use tokio::process::Command;
 
 use crate::args::AppArgs;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SecTrailPuppeteer {
-  #[serde(default)]
   pub success: bool,
-  #[serde(default)]
   pub message: String,
-  #[serde(default)]
   pub cookies: Vec<Cookie>,
-  #[serde(default)]
-  pub headers: BTreeMap<String, String>,
-  #[serde(rename = "userAgent")]
-  pub user_agent: String,
+  pub headers: HeaderMap,
+  pub unique: String,
 }
 
 impl SecTrailPuppeteer {
-  pub async fn new(args: AppArgs) -> Result<Self> {
+  pub async fn new(args: &AppArgs) -> Result<Self> {
+    setup_bun().await?;
+
     let cmd = Command::new("bun")
       .args([
         String::from("run"),
         String::from("index.ts"),
-        args.email.unwrap_or_default(),
-        args.password.unwrap_or_default(),
-        String::from(if args.headless { "headless" } else { "" }),
+        args.email.clone().unwrap_or_default(),
+        args.password.clone().unwrap_or_default(),
       ])
       .kill_on_drop(true)
       .stdout(Stdio::inherit())
@@ -37,14 +34,40 @@ impl SecTrailPuppeteer {
       .output()
       .await?;
 
-    println!("{}", String::from_utf8_lossy(&cmd.stderr));
-    println!("{}", String::from_utf8_lossy(&cmd.stdout));
-    println!("{}", cmd.status);
-    if cmd.status.code().is_some_and(|code| code > 1) {
+    if cmd.status.success() {
+      serde_json::from_str(String::from_utf8_lossy(&cmd.stdout).as_ref()).map_err(anyhow::Error::from)
+    } else {
       bail!(String::from_utf8_lossy(&cmd.stderr).into_owned())
     }
-    Ok(serde_json::from_str(String::from_utf8_lossy(&cmd.stdout).as_ref())?)
   }
+}
+
+pub async fn setup_bun() -> Result<()> {
+  let which = if cfg!(windows) { "where.exe" } else { "which" };
+  let bun_cmd = Command::new(which).stdout(stdout()).stderr(stdout()).args(["bun"]).output().await?;
+  if bun_cmd.status.success() {
+    return Ok(());
+  }
+
+  if cfg!(windows) {
+    Command::new("powershell")
+      .args(["-c", "irm bun.sh/install.ps1 | iex"])
+      .stdout(stdout())
+      .stderr(stdout())
+      .output()
+      .await?;
+  } else {
+    Command::new("bash")
+      .args(["-c", "curl -fsSL https://bun.sh/install | bash"])
+      .stdout(stdout())
+      .stderr(stdout())
+      .output()
+      .await?;
+  }
+
+  Command::new("bun").args(["install"]).output().await?;
+
+  Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,9 +103,6 @@ pub struct Cookie {
   pub partition_key: Option<PartitionKey>,
   /// True if cookie partition key is opaque. Supported only in Chrome.
   pub partition_key_opaque: Option<bool>,
-
-  #[serde(skip, default)]
-  vectorized: Vec<char>,
 }
 
 impl Cookie {
@@ -143,4 +163,21 @@ pub enum SourceScheme {
   Unset,
   NonSecure,
   Secure,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[tokio::test]
+  async fn test_puppeteer() {
+    let args = AppArgs {
+      email: Some(String::from("dagelanfl@pakde.io")),
+      password: Some(String::from("Bocahkosong@588")),
+      ..Default::default()
+    };
+
+    let puppeteer = SecTrailPuppeteer::new(&args).await;
+    assert!(puppeteer.is_ok(), "{}", puppeteer.unwrap_err());
+  }
 }

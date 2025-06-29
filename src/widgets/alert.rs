@@ -2,7 +2,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crossterm::event::Event;
-use helper::{UnhandledEvent, keys};
+use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
@@ -33,9 +33,9 @@ impl Alert {
     self
   }
 
-  pub fn handle_event(&mut self, event: &Event) -> Option<UnhandledEvent> {
+  pub fn handle_event(&mut self, event: &Event) -> Option<RenderEvent> {
     match event {
-      Event::Key(keys!(Char('y'), NONE, Press) | keys!(Enter, NONE, Press)) => Some(UnhandledEvent::handled()),
+      Event::Key(keys!(Char('y'), NONE, Press) | keys!(Enter, NONE, Press)) => Some(RenderEvent::handled()),
       _ => None,
     }
   }

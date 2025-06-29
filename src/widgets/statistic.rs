@@ -4,9 +4,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Stylize, Widget};
+use ratatui::symbols::border::Set;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Gauge, Paragraph};
+use ratatui::widgets::{Gauge, Padding};
 
+use crate::app::SYNC_STATE;
 use crate::ui::blk;
 
 #[derive(Debug, Clone)]
@@ -26,7 +28,7 @@ impl Statistic {
   pub fn new(label: impl Into<String>) -> Self {
     Self {
       cur: Arc::new(AtomicUsize::new(0)),
-      max: Arc::new(AtomicUsize::new(100)),
+      max: Arc::new(AtomicUsize::new(0)),
       label: label.into(),
     }
   }
@@ -61,7 +63,29 @@ impl Statistic {
     self.get_current() >= self.get_max()
   }
 
-  fn draw_title(&self) -> Line {
+  fn gauge_color(&self) -> Color {
+    if SYNC_STATE.is_processing() {
+      let percent = self.get_percentage().clamp(0.0, 1.0);
+      let r = ((1.0 - percent) * 255.0 + percent * 0.0).round() as u8;
+      let g = 0;
+      let b = ((1.0 - percent) * 0.0 + percent * 255.0).round() as u8;
+      Color::Rgb(r, g, b)
+    } else if SYNC_STATE.is_exiting() {
+      Color::Red
+    } else if SYNC_STATE.is_idling() {
+      Color::DarkGray
+    } else {
+      Color::Black
+    }
+  }
+  fn draw_title_top(&self) -> Line {
+    vec![Span::raw(" 📊 "), Span::raw("Statistics")]
+      .into_iter()
+      .collect::<Line>()
+      .left_aligned()
+  }
+
+  fn draw_gauge_title(&self) -> Line {
     let current = self.get_current();
     let max = self.get_max();
     let percentage = self.get_percentage();
@@ -78,7 +102,7 @@ impl Statistic {
       Span::raw(") "),
     ];
 
-    Line::from(spans)
+    Line::from(spans).centered().fg(Color::Black)
   }
 }
 
@@ -87,25 +111,39 @@ impl Widget for &Statistic {
   where
     Self: Sized,
   {
-    let [title_area, gauge_area] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
+    use ratatui::symbols::line::{DOUBLE_VERTICAL_LEFT, DOUBLE_VERTICAL_RIGHT};
 
-    // Render title
-    Paragraph::new(self.draw_title()).render(title_area, buf);
-
-    // Render gauge
-    let ratio = self.get_percentage() / 100.0;
-    let gauge_color = if self.is_complete() {
-      Color::Green
-    } else if ratio > 0.7 {
-      Color::Yellow
-    } else {
-      Color::Blue
+    let bs = Set {
+      top_left: DOUBLE_VERTICAL_RIGHT,
+      top_right: DOUBLE_VERTICAL_LEFT,
+      bottom_left: DOUBLE_VERTICAL_RIGHT,
+      bottom_right: DOUBLE_VERTICAL_LEFT,
+      vertical_left: "│",
+      vertical_right: "│",
+      horizontal_top: "─",
+      horizontal_bottom: "─",
     };
 
+    let outer_block = blk()
+      .title_top(self.draw_title_top())
+      .border_set(bs)
+      .fg(Color::LightCyan)
+      .padding(Padding::new(1, 1, 2, 1));
+
+    (&outer_block).render(area, buf);
+    let area = outer_block.inner(area);
+
+    let [top_area, gauge_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
+
+    let tops = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).split(top_area);
+    SYNC_STATE.as_spans().into_iter().collect::<Line>().render(tops[0], buf);
+
+    let gauge_placeholder_area = Layout::vertical([Constraint::Fill(1), Constraint::Length(1), Constraint::Fill(1)]).split(gauge_area);
     Gauge::default()
-      .block(blk())
-      .gauge_style(gauge_color)
-      .ratio(ratio)
+      .gauge_style(self.gauge_color())
+      .ratio(self.get_percentage() / 100.0)
       .render(gauge_area, buf);
+
+    self.draw_gauge_title().render(gauge_placeholder_area[1], buf);
   }
 }

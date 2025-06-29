@@ -1,22 +1,15 @@
 use std::path::PathBuf;
 
-use helper::UnhandledEvent;
+use helper::RenderEvent;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::watch::{Receiver, Sender};
 use tokio::{fs, select};
 
-use crate::app::handler::BucketStatus;
-use crate::app::{MpscRx, State, WatchRx};
-use crate::never;
+use crate::app::handler::sectrails::jsons::Record;
+use crate::app::{MpscRx, WatchRx, WatchTx};
 use crate::widgets::{Log, Logs};
+use crate::{never, wait_process};
 
-pub async fn output_writer(
-  mut bucket_rx: MpscRx<BucketStatus>,
-  mut output_rx: WatchRx<PathBuf>,
-  event: Sender<UnhandledEvent>,
-  logs: Logs,
-  receiver: Receiver<State>,
-) {
+pub async fn output_writer(mut bucket_rx: MpscRx<Record>, mut output_rx: WatchRx<PathBuf>, event: WatchTx<RenderEvent>, logs: Logs) {
   let mut output = output_rx.borrow_and_update().clone();
   loop {
     select! {
@@ -26,7 +19,8 @@ pub async fn output_writer(
   }
 }
 
-pub async fn writer(rx: &mut MpscRx<BucketStatus>, output: &PathBuf, event: &Sender<UnhandledEvent>, logs: Logs) {
+pub async fn writer(rx: &mut MpscRx<Record>, output: &PathBuf, event: &WatchTx<RenderEvent>, logs: Logs) {
+  wait_process!();
   let info = format!("Writer working on `{}`", output.display());
   logs.add(Log::info(info)).await;
 
@@ -41,22 +35,28 @@ pub async fn writer(rx: &mut MpscRx<BucketStatus>, output: &PathBuf, event: &Sen
     }
   };
 
+  let mut total_saved: usize = 0;
   let mut writer = BufWriter::new(file);
-  while let Some(bucket) = rx.recv().await.map(String::from) {
-    if let Err(err) = writer.write_all(bucket.as_bytes()).await {
+  while let Some(bucket) = rx.recv().await {
+    if let Err(err) = writer.write_all(bucket.as_csv().as_bytes()).await {
       logs.add(Log::error(err)).await;
-      event.send_modify(|e| *e = UnhandledEvent::render());
-    } else {
-      logs.add(Log::info(format!("Wrote bucket: {bucket}"))).await;
+      event.send_modify(RenderEvent::as_handled);
+
+      total_saved += 1;
     }
 
     if let Err(err) = writer.write_all(b"\n").await {
-      event.send_modify(|e| *e = UnhandledEvent::render());
+      event.send_modify(RenderEvent::as_handled);
       logs.add(Log::error(err)).await;
     }
     if let Err(err) = writer.flush().await {
-      event.send_modify(|e| *e = UnhandledEvent::render());
+      event.send_modify(RenderEvent::as_handled);
       logs.add(Log::error(err)).await;
+    }
+
+    if total_saved >= 1000 {
+      logs.add(Log::info(format!("Saved {total_saved} records"))).await;
+      total_saved = 0;
     }
   }
 
