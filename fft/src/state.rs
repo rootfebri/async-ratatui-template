@@ -36,16 +36,16 @@ impl Default for ExplorerState {
 
 pub struct ExplorerState {
   #[allow(dead_code)]
-  pub(super) runners: Runner,
-  pub(super) channels: Channels,
+  pub(crate) runners: Runner,
+  pub(crate) channels: Channels,
 
-  pub(super) cursor: usize, // byte position in input string
-  pub(super) input: String,
+  pub(crate) cursor: usize, // byte position in input string
+  pub(crate) input: String,
 
-  pub(super) cwd: PathBuf,
-  pub(super) list: Arc<RwLock<Vec<ExplorerContent>>>,
+  pub(crate) cwd: PathBuf,
+  pub(crate) list: Arc<RwLock<Vec<ExplorerContent>>>,
 
-  pub(super) list_state: ListState,
+  pub(crate) list_state: ListState,
 }
 
 impl ExplorerState {
@@ -196,11 +196,19 @@ impl ExplorerState {
     Some(RenderEvent::render())
   }
 
-  pub(super) fn selected_content_blocking(&self) -> Option<ExplorerContent> {
+  pub async fn get(self) -> Option<PathBuf> {
+    self
+      .read_items()
+      .await
+      .get(self.list_state.selected()?)
+      .map(|content| content.as_path().to_path_buf())
+  }
+
+  pub(crate) fn selected_content_blocking(&self) -> Option<ExplorerContent> {
     self.blocking_read_items().get(self.list_state.selected()?).cloned()
   }
 
-  pub(super) fn blocking_read_items(&self) -> Vec<ExplorerContent> {
+  pub(crate) fn blocking_read_items(&self) -> Vec<ExplorerContent> {
     use std::cmp::Ordering::*;
 
     let list = self.list.blocking_read();
@@ -217,10 +225,18 @@ impl ExplorerState {
       (false, false) => Less,
     });
 
+    if !self.input.is_empty() {
+      items.sort_unstable_by(|a, b| {
+        let a_score = a.as_cow().fuzzy_score(self.input.as_str());
+        let b_score = b.as_cow().fuzzy_score(self.input.as_str());
+        a_score.cmp(&b_score)
+      });
+    }
+
     items
   }
 
-  pub(super) async fn read_items(&self) -> Vec<ExplorerContent> {
+  pub(crate) async fn read_items(&self) -> Vec<ExplorerContent> {
     use std::cmp::Ordering::*;
 
     let list = self.list.read().await;
@@ -239,14 +255,6 @@ impl ExplorerState {
     });
 
     items
-  }
-
-  pub async fn get(self) -> Option<PathBuf> {
-    self
-      .read_items()
-      .await
-      .get(self.list_state.selected()?)
-      .map(|content| content.as_path().to_path_buf())
   }
 
   fn remove_word_backwards(&mut self) {
@@ -488,23 +496,6 @@ impl ExplorerState {
     }
   }
 
-  /// Ensure the selection is within bounds of the filtered list (blocking version for widget rendering)
-  /// This should only be called from widget render contexts where blocking is safe
-  #[allow(dead_code)]
-  fn clamp_selection(&mut self) {
-    let filtered_items = self.blocking_read_items();
-    if filtered_items.is_empty() {
-      self.list_state.select(None);
-    } else if let Some(selected) = self.list_state.selected() {
-      if selected >= filtered_items.len() {
-        self.list_state.select(Some(filtered_items.len() - 1));
-      }
-    } else {
-      // No selection but items exist, select first one
-      self.list_state.select(Some(0));
-    }
-  }
-
   /// Debug method to check the current state of the list
   #[allow(dead_code)]
   pub fn debug_list_state(&self) -> (usize, usize, bool) {
@@ -516,8 +507,8 @@ impl ExplorerState {
 }
 
 pub struct Channels {
-  pub(super) current_parrent_tx: watch::Sender<Option<PathBuf>>,
-  pub(super) current_child_tx: watch::Sender<Option<ExplorerContent>>,
+  pub(crate) current_parrent_tx: watch::Sender<Option<PathBuf>>,
+  pub(crate) current_child_tx: watch::Sender<Option<ExplorerContent>>,
 }
 pub struct NewChannels {
   pub parrent_watch: Receiver<Option<PathBuf>>,

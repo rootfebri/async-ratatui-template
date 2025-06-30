@@ -1,9 +1,10 @@
 use devicons::FileIcon;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect, Spacing};
+use ratatui::prelude::StatefulWidget;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, HighlightSpacing, List, ListItem, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, HighlightSpacing, List, ListDirection, ListItem, ListState, Paragraph, Widget, Wrap};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ops::DerefMut;
@@ -45,7 +46,7 @@ impl<'s> Explorer<'s> {
     self
   }
 
-  fn draw_filetree(&mut self) -> List<'s> {
+  fn draw_filetree(&mut self) -> impl StatefulWidget<State = ListState> + 's {
     self
       .state
       .blocking_read_items()
@@ -56,6 +57,7 @@ impl<'s> Explorer<'s> {
       .highlight_spacing(HighlightSpacing::Always)
       .highlight_style(Style::new().bg(Color::Rgb(50, 80, 70)).fg(Color::White).bold())
       .highlight_symbol("▶ ")
+      .direction(ListDirection::BottomToTop)
   }
 
   fn give_file_block(&self) -> Block<'static> {
@@ -171,9 +173,7 @@ impl Widget for Explorer<'_> {
     Clear.render(file_area, buf);
     Clear.render(input_area, buf);
 
-    // Render the file tree as a StatefulWidget to show highlighting
-    use ratatui::widgets::StatefulWidget;
-    StatefulWidget::render(self.draw_filetree(), file_area, buf, &mut self.state.list_state);
+    self.draw_filetree().render(file_area, buf, &mut self.state.list_state);
     self.draw_input().render(input_area, buf);
     self.draw_preview().render(content_area, buf);
   }
