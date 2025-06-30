@@ -126,18 +126,23 @@ impl ExplorerState {
 
       keys!(Char(chr), NONE, Press) => {
         self.insert_char(chr);
+        self.clamp_selection_async().await; // Use async version in key handler
       }
       keys!(Backspace, NONE, Press) => {
         self.delete_char_before_cursor();
+        self.clamp_selection_async().await; // Use async version in key handler
       }
       keys!(Delete, NONE, Press) => {
         self.delete_char_at_cursor();
+        self.clamp_selection_async().await; // Use async version in key handler
       }
       keys!(Backspace, CONTROL, Press) => {
         self.remove_word_backwards();
+        self.clamp_selection_async().await; // Use async version in key handler
       }
       keys!(Delete, CONTROL, Press) => {
         self.remove_word_forwards();
+        self.clamp_selection_async().await; // Use async version in key handler
       }
       keys!(Home, NONE, Press) => {
         self.move_cursor_home();
@@ -177,6 +182,7 @@ impl ExplorerState {
       }
       keys!(Char('u'), CONTROL, Press) => {
         self.clear_input();
+        self.clamp_selection_async().await; // Use async version in key handler
       }
 
       _ => {
@@ -462,13 +468,40 @@ impl ExplorerState {
     }
   }
 
-  /// Ensure we have a valid selection when items are available
+  /// Ensure we have a valid selection when items are available (async version)
   async fn ensure_selection(&mut self) {
-    if self.list_state.selected().is_none() {
-      // If no selection and we have items, select the first one
-      if !self.read_items().await.is_empty() {
-        self.list_state.select(Some(0));
+    self.clamp_selection_async().await;
+  }
+
+  /// Ensure the selection is within bounds of the filtered list (async version)
+  async fn clamp_selection_async(&mut self) {
+    let filtered_items = self.read_items().await;
+    if filtered_items.is_empty() {
+      self.list_state.select(None);
+    } else if let Some(selected) = self.list_state.selected() {
+      if selected >= filtered_items.len() {
+        self.list_state.select(Some(filtered_items.len() - 1));
       }
+    } else {
+      // No selection but items exist, select first one
+      self.list_state.select(Some(0));
+    }
+  }
+
+  /// Ensure the selection is within bounds of the filtered list (blocking version for widget rendering)
+  /// This should only be called from widget render contexts where blocking is safe
+  #[allow(dead_code)]
+  fn clamp_selection(&mut self) {
+    let filtered_items = self.blocking_read_items();
+    if filtered_items.is_empty() {
+      self.list_state.select(None);
+    } else if let Some(selected) = self.list_state.selected() {
+      if selected >= filtered_items.len() {
+        self.list_state.select(Some(filtered_items.len() - 1));
+      }
+    } else {
+      // No selection but items exist, select first one
+      self.list_state.select(Some(0));
     }
   }
 

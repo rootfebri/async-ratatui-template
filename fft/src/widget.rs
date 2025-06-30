@@ -45,7 +45,7 @@ impl<'s> Explorer<'s> {
     self
   }
 
-  fn draw_filetree(&mut self) -> impl Widget + 's {
+  fn draw_filetree(&mut self) -> List<'s> {
     self
       .state
       .blocking_read_items()
@@ -54,8 +54,8 @@ impl<'s> Explorer<'s> {
       .collect::<List>()
       .block(self.file_block.take().unwrap_or_else(|| self.give_file_block()))
       .highlight_spacing(HighlightSpacing::Always)
-      .highlight_style(Style::new().bg(Color::Rgb(131, 164, 150)))
-      .highlight_symbol(">")
+      .highlight_style(Style::new().bg(Color::Rgb(50, 80, 70)).fg(Color::White).bold())
+      .highlight_symbol("▶ ")
   }
 
   fn give_file_block(&self) -> Block<'static> {
@@ -171,7 +171,9 @@ impl Widget for Explorer<'_> {
     Clear.render(file_area, buf);
     Clear.render(input_area, buf);
 
-    self.draw_filetree().render(file_area, buf);
+    // Render the file tree as a StatefulWidget to show highlighting
+    use ratatui::widgets::StatefulWidget;
+    StatefulWidget::render(self.draw_filetree(), file_area, buf, &mut self.state.list_state);
     self.draw_input().render(input_area, buf);
     self.draw_preview().render(content_area, buf);
   }
