@@ -1,10 +1,8 @@
 mod runner;
 use runner::*;
 
-mod char_stream;
 pub mod state;
 pub mod widget;
-pub use char_stream::*;
 
 /// Trait for extending `String` with additional functionalities.
 /// This trait provides methods for manipulating strings in a way that is useful for text input handling.
@@ -31,7 +29,7 @@ impl StringExt for String {
     // Find the character at the given byte position
     let chr = self[byte_pos..].chars().next()?;
     let char_end = byte_pos + chr.len_utf8();
-    
+
     // Ensure we don't go out of bounds
     if char_end <= self.len() {
       self.drain(byte_pos..char_end);
@@ -156,7 +154,7 @@ mod tests {
     let mut s = String::from("test");
     assert_eq!(s.remove_char_at_byte(4), None); // Out of bounds
     assert_eq!(s.remove_char_at_byte(10), None); // Way out of bounds
-    
+
     // Test removing from invalid byte position within UTF-8 character
     let mut s = String::from("héllo");
     // Byte 2 is in the middle of 'é' character, so it should return None
