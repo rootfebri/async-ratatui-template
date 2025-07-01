@@ -8,7 +8,6 @@ use ratatui::widgets::{Block, BorderType, Clear, HighlightSpacing, List, ListDir
 use super::*;
 use explorer_state::ExplorerState;
 
-pub(crate) const MAX_CONTENT_SIZE: usize = (u16::MAX / 2) as usize;
 pub struct Explorer<'s> {
   state: &'s mut ExplorerState,
   selected_content: Option<ExplorerContent>,

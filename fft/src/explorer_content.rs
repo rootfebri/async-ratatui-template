@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -95,51 +95,25 @@ impl ExplorerContent {
   pub async fn async_new(path: impl AsRef<Path>) -> Self {
     let path = path.as_ref();
     if path.is_file() {
-      let bytes = match File::open(path).await {
+      let lines = match File::open(path).await {
         Ok(file) => {
-          let mut bufread = BufReader::new(file);
-          if let Ok(metadata) = bufread.get_ref().metadata().await
-            && metadata.len() <= crate::explorer::MAX_CONTENT_SIZE as u64
-          {
-            let mut vecread = vec![0u8; metadata.len() as usize];
-
-            if let Err(err) = bufread.read_to_end(&mut vecread).await {
-              let error = err.kind().to_string();
-              if let Some(null) = vecread.iter().position(|b| b == &0) {
-                vecread.truncate(null + 1);
-              } else {
-                vecread.extend_from_slice(error.as_bytes());
-                if vecread.len() > crate::explorer::MAX_CONTENT_SIZE {
-                  vecread.truncate(crate::explorer::MAX_CONTENT_SIZE);
-                }
-              }
-            }
-
-            vecread
-          } else {
-            let mut vectoread = vec![0u8; crate::explorer::MAX_CONTENT_SIZE];
-
-            match bufread.read_exact(&mut vectoread).await {
-              Ok(_) => vectoread,
-              Err(err) => {
-                if let std::io::ErrorKind::UnexpectedEof = err.kind() {
-                  if let Some(null) = vectoread.iter().position(|b| b == &0) {
-                    vectoread.truncate(null);
-                  }
-                  vectoread
-                } else {
-                  err.to_string().as_bytes().to_vec()
-                }
-              }
+          let mut lines = BufReader::new(file).lines();
+          let mut read_lines = vec![];
+          loop {
+            match lines.next_line().await {
+              Ok(Some(line)) if read_lines.len() < 100 => read_lines.push(line),
+              Err(err) => break read_lines.push(err.to_string()),
+              _ => break,
             }
           }
+          read_lines
         }
-        Err(err) => err.to_string().as_bytes().to_vec(),
+        Err(error) => vec![error.to_string()],
       };
 
       Self::File {
         path: Arc::from(path),
-        content: Arc::from(bytes),
+        content: Arc::from(lines.join("\n").as_bytes()),
       }
     } else {
       Self::Dir { path: Arc::from(path) }
