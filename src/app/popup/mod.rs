@@ -1,4 +1,4 @@
-use crate::ui::{center_constraints, fix_center};
+use crate::ui::{center_constraints, clear, fix_center};
 use crate::widgets::{Alert, Input};
 use crossterm::event::Event;
 use fft::Explorer;
@@ -57,8 +57,10 @@ impl Widget for &Popup {
 
     match self {
       Popup::Input(widget) => widget.render(area, buf),
-      Popup::Confirmation(widget) => widget.render(area, buf),
-      Popup::Warning(widget) => widget.render(area, buf),
+      Popup::Confirmation(widget) | Popup::Warning(widget) => {
+        clear(area, buf);
+        widget.render(area, buf);
+      }
       Popup::Alert(widget) => widget.render(area, buf),
       Popup::FileExplorer(state) => Explorer::new(state.borrow_mut().deref_mut()).render(area, buf),
     }

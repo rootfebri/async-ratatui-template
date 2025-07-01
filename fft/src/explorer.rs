@@ -155,15 +155,12 @@ fn center_constraints(area: Rect, w: Constraint, h: Constraint) -> Rect {
 
 impl Widget for Explorer<'_> {
   fn render(mut self, area: Rect, buf: &mut Buffer) {
+    Clear.render(area, buf);
     let area = center_constraints(area, Constraint::Percentage(80), Constraint::Percentage(90));
     let [left, content_area] = Layout::horizontal([Constraint::Fill(1); 2]).spacing(Spacing::Space(1)).areas::<2>(area);
     let [file_area, input_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(3)])
       .spacing(Spacing::Space(1))
       .areas::<2>(left);
-
-    Clear.render(content_area, buf);
-    Clear.render(file_area, buf);
-    Clear.render(input_area, buf);
 
     self.draw_filetree().render(file_area, buf, &mut self.state.list_state);
     self.draw_input().render(input_area, buf);

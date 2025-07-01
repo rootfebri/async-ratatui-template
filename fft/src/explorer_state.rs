@@ -88,8 +88,8 @@ impl ExplorerState {
     self.ensure_selection().await;
 
     match event {
-      keys!(Up, NONE, Press) => self.list_state.select_previous(),
-      keys!(Down, NONE, Press) => self.list_state.select_next(),
+      keys!(Up, NONE, Press) => self.list_state.select_next(),
+      keys!(Down, NONE, Press) => self.list_state.select_previous(),
       keys!(Left, NONE, Press) => self.move_cursor_left(),
       keys!(Right, NONE, Press) => self.move_cursor_right(),
 
