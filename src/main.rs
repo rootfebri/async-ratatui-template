@@ -39,14 +39,18 @@ async fn main() -> anyhow::Result<()> {
   let mut app_event = app.subscribe_event();
   // Initiate first render
   terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
+  let mut tick_count = 1;
+  app.logs.add(Log::info(format!("Tick count: {tick_count}"))).await;
 
   while status.is_ok() && !SYNC_STATE.is_exiting() {
     let handled = select! {
       _ = fps.tick() => {
+        app.logs.add(Log::info(format!("Tick count: {tick_count}"))).await;
+        tick_count += 1;
         terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
         continue;
       },
-      _ = app_event.changed() =>  app_event.borrow_and_update().clone(),
+      _ = app_event.changed() => app_event.borrow_and_update().clone(),
       poll = event.fuse_read() => match poll {
         Ok(event) =>
           app.handle(event).await,

@@ -15,7 +15,7 @@ impl Default for App {
     let (recorder, records) = mpsc::channel(1024);
     let output_tx = WatchTx::new(Default::default());
     let input_tx = WatchTx::new(Default::default());
-    let statistic = Statistic::new("Processing Domains");
+    let statistic = Statistic::new();
 
     tasks.spawn(input_reader(
       line_tx,

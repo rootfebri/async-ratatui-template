@@ -4,12 +4,13 @@ use crossterm::event::{Event, KeyEvent, MouseEvent};
 use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::prelude::Widget;
+use ratatui::prelude::{Line, Stylize, Widget};
+use ratatui::style::Color;
 use ratatui::widgets::{Paragraph, Wrap};
 use tokio::task::JoinSet;
 
 use super::*;
-use crate::ui::blk;
+use crate::ui::{blk, clear};
 use crate::widgets::{Alert, Logs, Statistic};
 
 mod impls;
@@ -179,28 +180,35 @@ impl App {
   }
 
   fn draw_input_widget(&self) -> impl Widget {
-    let block = blk().title_top(" Input File: ").title_alignment(Alignment::Left);
+    let block = blk()
+      .title_top(Line::raw(" Input File: ").fg(Color::White))
+      .title_alignment(Alignment::Left)
+      .fg(Color::Yellow);
     let input_value = if let Some(ref path) = self.input {
       path.display().to_string()
     } else {
       String::from("None")
     };
 
-    Paragraph::new(input_value)
+    Paragraph::new(Line::raw(input_value).fg(Color::LightCyan))
       .block(block)
       .wrap(Wrap { trim: true })
       .scroll(self.scrols.input_widget)
   }
 
   fn draw_output_widget(&self) -> impl Widget {
-    let block = blk().title_top(" Output File: ").title_alignment(Alignment::Left);
+    let block = blk()
+      .title_top(Line::raw(" Output File: ").fg(Color::White))
+      .title_alignment(Alignment::Left)
+      .fg(Color::Yellow);
+
     let input_value = if let Some(ref path) = self.output {
       path.display().to_string()
     } else {
       String::from("None")
     };
 
-    Paragraph::new(input_value)
+    Paragraph::new(Line::raw(input_value).fg(Color::Blue))
       .block(block)
       .wrap(Wrap { trim: true })
       .scroll(self.scrols.output_widget)
@@ -217,16 +225,20 @@ impl Widget for &App {
     }
 
     let [controls, activity] = Layout::vertical([Constraint::Percentage(30), Constraint::Percentage(70)]).areas(area);
-    let controls = Layout::horizontal([Constraint::Percentage(68), Constraint::Fill(1)]).split(controls);
+    let controls = Layout::horizontal([Constraint::Percentage(60), Constraint::Fill(1)]).split(controls);
     let control_chunks = Layout::vertical([Constraint::Length(3), Constraint::Length(3), Constraint::Fill(1)]).split(controls[0]);
 
     tokio::task::block_in_place(|| {
+      clear(control_chunks[0], buf);
       self.draw_input_widget().render(control_chunks[0], buf);
+      clear(control_chunks[1], buf);
       self.draw_output_widget().render(control_chunks[1], buf);
 
       // Render statistic widget in the right column
+      clear(controls[1], buf);
       self.statistic.render(controls[1], buf);
 
+      clear(activity, buf);
       self.logs.render(activity, buf);
 
       if let Some(ref popup) = self.popup {
