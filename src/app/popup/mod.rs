@@ -40,10 +40,7 @@ impl Popup {
       Popup::Confirmation(_) => fix_center(area, 45, 25),
       Popup::Warning(_) => fix_center(area, 15, 15),
       Popup::Alert(_) => fix_center(area, 25, 25),
-      Popup::FileExplorer(_) => {
-        area
-        /*center_constraints(area, Constraint::Percentage(85), Constraint::Length(85))*/
-      }
+      Popup::FileExplorer(_) => center_constraints(area, Constraint::Percentage(80), Constraint::Percentage(90)),
     }
   }
 }

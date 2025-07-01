@@ -61,17 +61,17 @@ impl Widget for &Alert {
   where
     Self: Sized,
   {
-    clear(area, buf);
-    self.known_area.replace(area);
-
     let block = blk()
       .title_top(String::from_utf8_lossy(self.title.as_bytes()))
       .title_bottom(self.line_controls())
       .fg(Color::Rgb(255, 123, 0));
 
+    clear(area, buf);
     Paragraph::new(Text::from_iter(self.as_lines()))
       .block(block)
       .wrap(Wrap { trim: false })
       .render(area, buf);
+
+    self.known_area.replace(area);
   }
 }

@@ -1,34 +1,32 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::app::SYNC_STATE;
-use crate::ui::blk;
+use crate::ui::{blk, clear};
+use crate::widgets::pulse::PulseState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Style, Stylize, Widget};
+use ratatui::symbols::DOT;
 use ratatui::symbols::border::Set;
 use ratatui::text::{Line, Span, ToLine};
 use ratatui::widgets::LineGauge;
 
-impl Default for Statistic {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct Statistic {
   cur: Arc<AtomicUsize>,
   max: Arc<AtomicUsize>,
+  pulse_state: Arc<Mutex<PulseState>>,
 }
 
 type InnerBlockArea = Rect;
 impl Statistic {
-  pub fn new() -> Self {
-    Self {
-      cur: Arc::new(AtomicUsize::new(0)),
-      max: Arc::new(AtomicUsize::new(0)),
-    }
+  pub fn pulse_state(mut self, pulse_state: PulseState) -> Self {
+    self.pulse_state = Arc::new(Mutex::new(pulse_state));
+    self
+  }
+  pub fn set_pulse_state(&mut self, pulse_state: PulseState) {
+    *self.pulse_state.lock().unwrap() = pulse_state;
   }
 
   pub fn set_current(&self, value: usize) {
@@ -70,11 +68,16 @@ impl Statistic {
   }
 
   fn draw_bar_percentage(&self) -> LineGauge {
-    let indicator_line = [Span::raw(ratatui::symbols::line::HORIZONTAL), Span::raw(" ")]
-      .into_iter()
-      .chain(SYNC_STATE.as_spans())
-      .chain([Span::raw(" "), Span::raw(ratatui::symbols::line::CROSS)])
-      .collect::<Line>();
+    let indicator_line: Line = [
+      Span::raw(ratatui::symbols::line::HORIZONTAL),
+      Span::raw(" "),
+      Span::raw(DOT).fg(self.pulse_state.try_lock().unwrap().color(SYNC_STATE.as_pulse_level())),
+      Span::raw(SYNC_STATE.as_ref()),
+      Span::raw(" "),
+      Span::raw(ratatui::symbols::line::CROSS),
+    ]
+    .into_iter()
+    .collect();
 
     let block = blk()
       .fg(Color::Reset)
@@ -82,7 +85,7 @@ impl Statistic {
       .title_top(self.gauge_stats_line().right_aligned());
 
     LineGauge::default()
-      .ratio((self.get_percentage()) / 100f64)
+      .ratio(self.get_percentage() / 100f64)
       .line_set(ratatui::symbols::line::NORMAL)
       .block(block)
       .filled_style(self.gauge_color())
@@ -147,6 +150,7 @@ impl Widget for &Statistic {
 
     let [gauge_area, _] = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(inner_area);
 
+    clear(gauge_area, buf);
     self.draw_bar_percentage().render(gauge_area, buf);
   }
 }

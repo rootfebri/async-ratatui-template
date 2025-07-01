@@ -38,10 +38,13 @@ async fn main() -> anyhow::Result<()> {
   let mut app = App::default();
   let mut app_event = app.subscribe_event();
   terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
+  let mut ticktime = 0;
 
   while status.is_ok() && !SYNC_STATE.is_exiting() {
+    ticktime += 1;
     let handled = select! {
       _ = fps.tick() => {
+        app.logs.add(Log::info(format!("New tick: {ticktime}"))).await;
         terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
         continue;
       },

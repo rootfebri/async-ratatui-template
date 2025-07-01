@@ -148,22 +148,18 @@ impl<'s> Explorer<'s> {
   }
 }
 
-fn center_constraints(area: Rect, w: Constraint, h: Constraint) -> Rect {
-  let [_, w, _] = Layout::horizontal([Constraint::Fill(1), w, Constraint::Fill(1)]).areas(area);
-  Layout::vertical([Constraint::Fill(1), h, Constraint::Fill(1)]).split(w)[1]
-}
-
 impl Widget for Explorer<'_> {
   fn render(mut self, area: Rect, buf: &mut Buffer) {
-    Clear.render(area, buf);
-    let area = center_constraints(area, Constraint::Percentage(80), Constraint::Percentage(90));
     let [left, content_area] = Layout::horizontal([Constraint::Fill(1); 2]).spacing(Spacing::Space(1)).areas::<2>(area);
     let [file_area, input_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(3)])
       .spacing(Spacing::Space(1))
       .areas::<2>(left);
 
+    Clear.render(file_area, buf);
     self.draw_filetree().render(file_area, buf, &mut self.state.list_state);
+    Clear.render(input_area, buf);
     self.draw_input().render(input_area, buf);
+    Clear.render(content_area, buf);
     self.draw_preview().render(content_area, buf);
   }
 }

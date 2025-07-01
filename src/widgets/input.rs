@@ -220,6 +220,7 @@ impl Input {
       result_spans
     };
 
+    clear(area, buf);
     Paragraph::new(Line::from_iter(spans)).block(block).render(area, buf);
   }
 }
@@ -229,7 +230,6 @@ impl Widget for &Input {
   where
     Self: Sized,
   {
-    clear(area, buf);
     self.known_area.replace(area);
     self.draw_input(area, buf)
   }

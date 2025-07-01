@@ -5,6 +5,7 @@ use crate::app::app_::impls::checker::line_checker;
 use crate::app::app_::impls::reader::input_reader;
 use crate::app::app_::impls::writer::output_writer;
 use crate::widgets::Statistic;
+use crate::widgets::pulse::{PulseFps, PulseState};
 
 impl Default for App {
   fn default() -> Self {
@@ -15,7 +16,7 @@ impl Default for App {
     let (recorder, records) = mpsc::channel(1024);
     let output_tx = WatchTx::new(Default::default());
     let input_tx = WatchTx::new(Default::default());
-    let statistic = Statistic::new();
+    let statistic = Statistic::default().pulse_state(PulseState::new(PulseFps::VeryLow));
 
     tasks.spawn(input_reader(
       line_tx,

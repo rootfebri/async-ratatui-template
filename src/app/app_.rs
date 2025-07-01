@@ -219,7 +219,6 @@ impl Widget for &App {
       // Render statistic widget in the right column
       self.statistic.render(controls[1], buf);
 
-      clear(activity, buf);
       self.logs.render(activity, buf);
 
       if let Some(ref popup) = self.popup {

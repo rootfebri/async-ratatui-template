@@ -110,17 +110,14 @@ impl Clone for Logs {
 impl Widget for &Logs {
   fn render(self, area: Rect, buf: &mut Buffer) {
     self.known_area.replace(area);
-    clear(area, buf);
 
-    let title = Line::raw(" 📈Activities ").left_aligned();
+    let title = Line::raw(" 📈 Activities ").left_aligned();
     let block = blk().title_top(title);
     let locked_items = self.items.blocking_read();
     let items = locked_items.iter().map(Log::as_list_item).rev().collect::<Vec<_>>();
     let list = List::default().items(items).block(block).direction(ListDirection::BottomToTop);
 
-    {
-      let mut state = self.state.blocking_write();
-      StatefulWidget::render(list, area, buf, state.deref_mut())
-    }
+    clear(area, buf);
+    StatefulWidget::render(list, area, buf, self.state.blocking_write().deref_mut());
   }
 }
