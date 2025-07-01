@@ -1,8 +1,14 @@
 mod runner;
 use runner::*;
 
-pub mod state;
-pub mod widget;
+mod explorer_content;
+pub use explorer_content::*;
+
+mod explorer;
+pub use explorer::*;
+
+mod explorer_state;
+pub use explorer_state::*;
 
 /// Trait for extending `String` with additional functionalities.
 /// This trait provides methods for manipulating strings in a way that is useful for text input handling.
@@ -58,6 +64,7 @@ pub trait Fuzzier {
         return true;
       }
     }
+
     false
   }
 

@@ -1,12 +1,11 @@
-use std::time::{Duration, Instant};
-
+use chrono::{DateTime, Local};
 use ratatui::text::{Line, Span};
 
 macro_rules! impl_variants {
     ($vi:vis, $variant:ident, $event:ident$(($($parname:ident:$partype:ty),*))? $(,)?) => {
       impl $crate::RenderEvent {
         $vi fn $variant($($($parname: $partype),+)?) -> Self {
-          Self {kind: $crate::EventKind::$event$(($($parname),+))?, event_time: Instant::now()}
+          Self {kind: $crate::RenderKind::$event$(($($parname),+))?, event_time: Local::now()}
         }
       }
     };
@@ -20,78 +19,43 @@ impl_variants!(pub, error, Error(v: Span<'static>));
 impl_variants!(pub, warn, Warn(v: Span<'static>));
 
 mod event;
-pub use event::EventKind;
+pub use event::RenderKind;
 
 impl Default for RenderEvent {
   fn default() -> Self {
     Self {
-      kind: EventKind::NoOps,
-      event_time: Instant::now(),
+      kind: RenderKind::NoOps,
+      event_time: Local::now(),
     }
   }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderEvent {
-  pub kind: EventKind,
-  event_time: Instant,
+  pub kind: RenderKind,
+  pub event_time: DateTime<Local>,
 }
 
 impl RenderEvent {
-  pub fn as_handled(&mut self) {
-    self.kind = EventKind::Handled;
-    self.event_time = Instant::now();
-  }
-  pub fn modify_60fps(&mut self, new: Self) -> bool {
-    if self.fps_60() {
-      *self = new;
-      true
-    } else {
-      false
-    }
+  pub fn make_handled(&mut self) {
+    self.kind = RenderKind::Handled;
+    self.event_time = Local::now();
   }
 
-  pub fn new(event: EventKind) -> Self {
+  pub fn new(event: RenderKind) -> Self {
     Self {
       kind: event,
-      event_time: Instant::now(),
+      event_time: Local::now(),
     }
   }
 
-  pub fn read(self) -> EventKind {
+  pub fn read(self) -> RenderKind {
     self.kind
   }
 
-  pub fn event_time(&self) -> Instant {
-    self.event_time
-  }
-  pub fn elapsed_since(&self) -> Duration {
-    self.event_time.elapsed()
-  }
-  pub fn is_ms_ago(&self, rhs: u128) -> bool {
-    self.event_time.elapsed().as_millis() > rhs
-  }
-  pub fn is_mc_ago(&self, rhs: u128) -> bool {
-    self.event_time.elapsed().as_micros() > rhs
-  }
-  pub fn is_ns_ago(&self, rhs: u128) -> bool {
-    self.event_time.elapsed().as_nanos() > rhs
-  }
-
-  pub fn fps_120(&self) -> bool {
-    self.is_ms_ago(8)
-  }
-  pub fn fps_60(&self) -> bool {
-    self.is_ms_ago(16)
-  }
-  pub fn fps_30(&self) -> bool {
-    self.is_ms_ago(33)
-  }
-  pub fn fps_15(&self) -> bool {
-    self.is_ms_ago(66)
-  }
-  pub fn is_already(&self, fps: u128) -> bool {
-    self.is_ms_ago(1000 / fps)
+  #[inline]
+  pub fn is_frame(&self, fps: u16) -> bool {
+    Local::now().timestamp_millis() - self.event_time.timestamp_millis() > 1000 / fps as i64
   }
 
   pub fn event_as_line<I>(&self, spans: impl Into<Option<I>>) -> Line
@@ -99,7 +63,7 @@ impl RenderEvent {
     I: IntoIterator<Item = Span<'static>>,
   {
     let span = match self.kind {
-      EventKind::Error(ref span) | EventKind::Warn(ref span) => span.clone(),
+      RenderKind::Error(ref span) | RenderKind::Warn(ref span) => span.clone(),
       ref event => Span::from(event.to_string()),
     };
 
@@ -113,6 +77,6 @@ impl RenderEvent {
 
 impl From<std::io::Error> for RenderEvent {
   fn from(error: std::io::Error) -> Self {
-    Self::new(EventKind::Error(Span::from(error.kind().to_string())))
+    Self::new(RenderKind::Error(Span::from(error.kind().to_string())))
   }
 }

@@ -3,86 +3,65 @@ use crossterm::event::KeyEvent;
 use helper::{RenderEvent, keys};
 use ratatui::widgets::ListState;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch::Receiver;
 use tokio::sync::{RwLock, watch};
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use widget::ExplorerContent;
 
 impl Default for ExplorerState {
   fn default() -> Self {
-    let list: Arc<RwLock<Vec<ExplorerContent>>> = Default::default();
-    let cwd = PathBuf::from("./");
-    let (channels, new_channels) = Channels::new();
-
-    // Send the initial directory to trigger scanning
-    _ = channels.current_parrent_tx.send(Some(cwd.clone()));
-
-    let runners = Runner::new(new_channels, list.clone());
-
-    Self {
-      runners,
-      channels,
-      cursor: 0,
-      input: String::new(),
-      cwd,
-      list,
-      list_state: ListState::default(),
-    }
+    Self::new(None)
   }
 }
 
 pub struct ExplorerState {
   #[allow(dead_code)]
-  pub(crate) runners: Runner,
-  pub(crate) channels: Channels,
+  dir_scanner: JoinHandle<()>,
+  pub(crate) watch_dir: watch::Sender<Arc<Path>>,
 
   pub(crate) cursor: usize, // byte position in input string
   pub(crate) input: String,
 
-  pub(crate) cwd: PathBuf,
   pub(crate) list: Arc<RwLock<Vec<ExplorerContent>>>,
 
   pub(crate) list_state: ListState,
 }
 
 impl ExplorerState {
-  async fn update_watched_child(&mut self) {
-    let selected_content = self.selected_content().await;
-    self
-      .channels
-      .current_child_tx
-      .send_modify(|current_child| *current_child = selected_content);
+  fn new(entry: impl Into<Option<PathBuf>>) -> Self {
+    let canonicalized = Self::realpath_blocking(entry.into().unwrap_or_else(|| PathBuf::from("./")));
+    let (watch_tx, watch_rx) = watch::channel(Arc::from(canonicalized));
+    let list: Arc<RwLock<Vec<ExplorerContent>>> = Default::default();
+
+    Self {
+      dir_scanner: tokio::spawn(parent_content_scanner(watch_rx, list.clone())),
+      watch_dir: watch_tx,
+      cursor: 0,
+      input: String::new(),
+      list,
+      list_state: ListState::default(),
+    }
   }
 
-  async fn update_watched_cwd(&mut self) {
-    self.channels.current_child_tx.send_modify(|current_child| _ = current_child.take());
+  async fn update_watched_cwd(&mut self, path: impl Into<PathBuf>) -> Option<RenderEvent> {
+    let path = path.into();
+    if !path.is_dir() {
+      return None;
+    }
 
-    // Notify the scanner of the new current working directory
-    self
-      .channels
-      .current_parrent_tx
-      .send_modify(|current_cwd| *current_cwd = Some(self.cwd.clone()));
+    let canonicalized = Self::realpath(path).await;
+
+    self.list.write().await.clear();
+    self.watch_dir.send_modify(|dir| *dir = Arc::from(canonicalized));
 
     // Give the scanner a moment to start processing
     sleep(Duration::from_millis(16)).await;
-
     // Sync the new list contents and ensure selection
     self.ensure_selection().await;
 
-    // Update the selected child if we have items
-    let selected_child = if let Some(i) = self.list_state.selected() {
-      self.read_items().await.get(i).cloned()
-    } else {
-      None
-    };
-
-    self
-      .channels
-      .current_child_tx
-      .send_modify(|current_child| *current_child = selected_child);
+    Some(RenderEvent::render())
   }
 
   async fn selected_content(&self) -> Option<ExplorerContent> {
@@ -109,86 +88,54 @@ impl ExplorerState {
     self.ensure_selection().await;
 
     match event {
-      keys!(Up, NONE, Press) => {
-        self.list_state.select_previous();
-        self.update_watched_child().await;
-      }
-      keys!(Down, NONE, Press) => {
-        self.list_state.select_next();
-        self.update_watched_child().await;
-      }
-      keys!(Left, NONE, Press) => {
-        self.move_cursor_left();
-      }
-      keys!(Right, NONE, Press) => {
-        self.move_cursor_right();
-      }
+      keys!(Up, NONE, Press) => self.list_state.select_previous(),
+      keys!(Down, NONE, Press) => self.list_state.select_next(),
+      keys!(Left, NONE, Press) => self.move_cursor_left(),
+      keys!(Right, NONE, Press) => self.move_cursor_right(),
 
       keys!(Char(chr), NONE, Press) => {
         self.insert_char(chr);
-        self.clamp_selection_async().await; // Use async version in key handler
+        self.clamp_selection_async().await;
       }
       keys!(Backspace, NONE, Press) => {
         self.delete_char_before_cursor();
-        self.clamp_selection_async().await; // Use async version in key handler
+        self.clamp_selection_async().await;
       }
       keys!(Delete, NONE, Press) => {
         self.delete_char_at_cursor();
-        self.clamp_selection_async().await; // Use async version in key handler
+        self.clamp_selection_async().await;
       }
       keys!(Backspace, CONTROL, Press) => {
         self.remove_word_backwards();
-        self.clamp_selection_async().await; // Use async version in key handler
+        self.clamp_selection_async().await;
       }
       keys!(Delete, CONTROL, Press) => {
         self.remove_word_forwards();
-        self.clamp_selection_async().await; // Use async version in key handler
+        self.clamp_selection_async().await;
       }
-      keys!(Home, NONE, Press) => {
-        self.move_cursor_home();
-      }
-      keys!(End, NONE, Press) => {
-        self.move_cursor_end();
-      }
-      keys!(Left, CONTROL, Press) => {
-        self.move_cursor_word_left();
-      }
-      keys!(Right, CONTROL, Press) => {
-        self.move_cursor_word_right();
-      }
+      keys!(Home, NONE, Press) => self.move_cursor_home(),
+      keys!(End, NONE, Press) => self.move_cursor_end(),
+      keys!(Left, CONTROL, Press) => self.move_cursor_word_left(),
+      keys!(Right, CONTROL, Press) => self.move_cursor_word_right(),
 
       keys!(Esc, NONE, Press) => return Some(RenderEvent::canceled()),
       keys!(Enter, NONE, Press) => return Some(RenderEvent::handled()),
       keys!(Left, ALT, Press) => {
-        if self.cwd.pop() {
-          self.update_watched_cwd().await;
-        }
-
-        return None;
+        let mut cwd = self.watch_dir.borrow().to_path_buf();
+        return if cwd.pop() { self.update_watched_cwd(cwd).await } else { None };
       }
       keys!(Right, ALT, Press) => {
-        if let Some(content) = self.selected_content().await
-          && !content.is_file()
-        {
-          self.cwd = content.as_path().to_path_buf();
-          self.update_watched_cwd().await;
-        } else {
-          return None;
-        }
+        let content = self.selected_content().await.and_then(|c| if c.is_dir() { Some(c) } else { None })?;
+        return self.update_watched_cwd(content.as_path().to_path_buf()).await;
       }
 
-      keys!(Char('a'), CONTROL, Press) => {
-        self.select_all();
-      }
+      keys!(Char('a'), CONTROL, Press) => self.select_all(),
       keys!(Char('u'), CONTROL, Press) => {
         self.clear_input();
-        self.clamp_selection_async().await; // Use async version in key handler
+        self.clamp_selection_async().await;
       }
 
-      _ => {
-        // No key matched, no need to render
-        return None;
-      }
+      _ => return None,
     }
 
     // Always normalize cursor after text operations
@@ -214,7 +161,7 @@ impl ExplorerState {
     let list = self.list.blocking_read();
     let mut items = list
       .iter()
-      .filter(|item| self.input.is_empty() || item.as_cow().fuzzy_contains(self.input.as_str()))
+      .filter(|item| self.input.is_empty() || item.filename().fuzzy_contains(self.input.as_str()))
       .map(ExplorerContent::clone)
       .collect::<Vec<_>>();
     drop(list);
@@ -227,8 +174,8 @@ impl ExplorerState {
 
     if !self.input.is_empty() {
       items.sort_unstable_by(|a, b| {
-        let a_score = a.as_cow().fuzzy_score(self.input.as_str());
-        let b_score = b.as_cow().fuzzy_score(self.input.as_str());
+        let a_score = a.filename().fuzzy_score(self.input.as_str());
+        let b_score = b.filename().fuzzy_score(self.input.as_str());
         a_score.cmp(&b_score)
       });
     }
@@ -242,7 +189,7 @@ impl ExplorerState {
     let list = self.list.read().await;
     let mut items = list
       .iter()
-      .filter(|item| self.input.is_empty() || item.as_cow().fuzzy_contains(self.input.as_str()))
+      .filter(|item| self.input.is_empty() || item.filename().fuzzy_contains(self.input.as_str()))
       .map(ExplorerContent::clone)
       .collect::<Vec<_>>();
 
@@ -496,38 +443,29 @@ impl ExplorerState {
     }
   }
 
-  /// Debug method to check the current state of the list
-  #[allow(dead_code)]
-  pub fn debug_list_state(&self) -> (usize, usize, bool) {
-    let list = self.list.blocking_read();
-    let filtered_count = self.blocking_read_items().len();
-    let has_selection = self.list_state.selected().is_some();
-    (list.len(), filtered_count, has_selection)
+  async fn realpath(path: PathBuf) -> PathBuf {
+    if !path.is_relative() {
+      return path;
+    }
+
+    let Ok(canonicalized) = tokio::fs::canonicalize(&path).await else {
+      return path;
+    };
+    canonicalized
+      .components()
+      .filter(|c| !matches!(c, std::path::Component::Prefix(_)))
+      .collect()
   }
-}
 
-pub struct Channels {
-  pub(crate) current_parrent_tx: watch::Sender<Option<PathBuf>>,
-  pub(crate) current_child_tx: watch::Sender<Option<ExplorerContent>>,
-}
-pub struct NewChannels {
-  pub parrent_watch: Receiver<Option<PathBuf>>,
-  pub child_watch: Receiver<Option<ExplorerContent>>,
-}
+  fn realpath_blocking(path: PathBuf) -> PathBuf {
+    if !path.is_relative() {
+      return path;
+    }
 
-impl Channels {
-  pub fn new() -> (Channels, NewChannels) {
-    let (current_parrent_tx, current_parrent_rx) = watch::channel(Option::<PathBuf>::None);
-    let (current_child_tx, current_child_rx) = watch::channel(Option::<ExplorerContent>::None);
-    (
-      Self {
-        current_parrent_tx,
-        current_child_tx,
-      },
-      NewChannels {
-        parrent_watch: current_parrent_rx,
-        child_watch: current_child_rx,
-      },
-    )
+    let Ok(canonicalized) = path.canonicalize() else { return path };
+    canonicalized
+      .components()
+      .filter(|c| !matches!(c, std::path::Component::Prefix(_)))
+      .collect()
   }
 }

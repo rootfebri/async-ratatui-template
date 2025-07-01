@@ -1,23 +1,14 @@
-use devicons::FileIcon;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect, Spacing};
 use ratatui::prelude::StatefulWidget;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, HighlightSpacing, List, ListDirection, ListItem, ListState, Paragraph, Widget, Wrap};
-use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::ops::DerefMut;
-use std::path::Path;
-use std::str::FromStr;
-use std::sync::Arc;
-use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, BufReader, Lines};
-use tokio::sync::RwLock;
 
 use super::*;
-use state::ExplorerState;
+use explorer_state::ExplorerState;
 
+pub(crate) const MAX_CONTENT_SIZE: usize = (u16::MAX / 2) as usize;
 pub struct Explorer<'s> {
   state: &'s mut ExplorerState,
   selected_content: Option<ExplorerContent>,
@@ -112,7 +103,7 @@ impl<'s> Explorer<'s> {
       .block(self.input_block.take().unwrap_or_else(|| self.give_input_block()))
   }
 
-  fn give_input_block(&self) -> Block {
+  fn give_input_block(&self) -> Block<'s> {
     let title_top_left = Line::raw(" Filter File/Dir(s) ").fg(Color::White).left_aligned();
     let title_top_right = Line::raw(format!(
       "{} / {}",
@@ -122,7 +113,7 @@ impl<'s> Explorer<'s> {
     .fg(Color::DarkGray)
     .right_aligned();
 
-    let title_bottom = Line::raw(self.state.cwd.to_string_lossy());
+    let title_bottom = Line::raw(self.state.watch_dir.borrow().to_string_lossy().into_owned());
 
     Block::bordered()
       .border_type(BorderType::Rounded)
@@ -136,7 +127,8 @@ impl<'s> Explorer<'s> {
     let path_str = self
       .selected_content
       .as_ref()
-      .map(|selected| selected.as_cow().to_string())
+      .map(ExplorerContent::filename)
+      .map(String::from)
       .unwrap_or_default();
     let title_top = [Span::raw(" File Preview: ").white(), Span::raw(path_str).yellow()];
 
@@ -149,7 +141,7 @@ impl<'s> Explorer<'s> {
   fn draw_preview(&mut self) -> impl Widget {
     let block = self.preview_block();
     if let Some(ref selected_content) = self.selected_content {
-      selected_content.as_preview().block(block).wrap(Wrap { trim: false }).left_aligned()
+      selected_content.as_preview().block(block).left_aligned()
     } else {
       Paragraph::new("").block(block)
     }
@@ -177,154 +169,4 @@ impl Widget for Explorer<'_> {
     self.draw_input().render(input_area, buf);
     self.draw_preview().render(content_area, buf);
   }
-}
-
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum ExplorerContent {
-  Dir {
-    path: Arc<Path>,
-  },
-  File {
-    path: Arc<Path>,
-    content: Arc<RwLock<String>>,
-    state: Arc<RwLock<ExplorerContentState>>,
-  },
-}
-
-impl ExplorerContent {
-  pub fn icon(&self) -> Span<'static> {
-    let fileicon = FileIcon::from(self.as_path());
-    let color = Color::from_str(fileicon.color).unwrap_or(Color::Reset);
-    let icon = fileicon.icon.to_string();
-
-    Span::raw(icon).fg(color)
-  }
-
-  pub fn apply_colors(&self, input: &str) -> Line<'static> {
-    let icon = self.icon();
-    if input.is_empty() {
-      let mut line = Line::default();
-      line.push_span(icon);
-      line.push_span(Span::raw(" "));
-      line.push_span(Span::raw(self.as_cow().to_string()).white());
-
-      return line;
-    };
-
-    let mut spans: Vec<Span> = vec![icon, Span::raw(" ")];
-
-    let path_str = self.as_cow();
-    let input_chars: Vec<_> = input.chars().collect();
-
-    for chr in path_str.chars() {
-      let span = Span::raw(chr.to_string());
-
-      if input_chars.contains(&chr) {
-        spans.push(span.fg(Color::Rgb(36, 132, 96)));
-      } else {
-        spans.push(span.fg(Color::White));
-      }
-    }
-
-    spans.into()
-  }
-
-  pub async fn open_lines_buffered(&self) -> Option<Lines<BufReader<File>>> {
-    let ExplorerContent::File { ref path, .. } = *self else { return None };
-    let file = File::open(path).await.ok()?;
-    Some(BufReader::new(file).lines())
-  }
-
-  async fn never() -> ! {
-    loop {
-      tokio::time::sleep(tokio::time::Duration::from_secs(39)).await
-    }
-  }
-
-  pub async fn auto_load(&self) {
-    let Self::File { ref state, ref content, .. } = *self else {
-      Self::never().await
-    };
-
-    'main: loop {
-      let mut state = state.write().await;
-      match state.deref_mut() {
-        ExplorerContentState::Start => {
-          if let Some(stream) = self.open_lines_buffered().await {
-            *state = ExplorerContentState::LinesBuffer(Box::from(stream));
-          } else {
-            *state = ExplorerContentState::Done;
-          }
-        }
-        ExplorerContentState::LinesBuffer(stream) => {
-          if let Ok(Some(ref str)) = stream.next_line().await {
-            content.write().await.push_str(str);
-            content.write().await.push('\n');
-            continue 'main;
-          } else {
-            *state = ExplorerContentState::Done;
-            continue 'main;
-          }
-        }
-        ExplorerContentState::Done => break,
-      }
-    }
-  }
-
-  pub fn is_file(&self) -> bool {
-    matches!(self, Self::File { .. })
-  }
-
-  pub fn as_path(&self) -> &Path {
-    match *self {
-      ExplorerContent::Dir { ref path, .. } | ExplorerContent::File { ref path, .. } => path.as_ref(),
-    }
-  }
-
-  pub fn content(&self) -> String {
-    std::thread::sleep(std::time::Duration::from_millis(1));
-
-    match *self {
-      ExplorerContent::Dir { .. } => String::new(),
-      ExplorerContent::File { ref content, .. } => content.blocking_read().clone(),
-    }
-  }
-
-  pub fn as_preview(&self) -> Paragraph {
-    let content = Line::from(self.content()).fg(Color::White);
-    Paragraph::new(content)
-  }
-
-  pub fn as_cow(&self) -> Cow<'_, str> {
-    self.as_path().to_string_lossy()
-  }
-}
-
-impl PartialEq for ExplorerContent {
-  fn eq(&self, other: &Self) -> bool {
-    self.as_path() == other.as_path()
-  }
-}
-
-impl PartialOrd for ExplorerContent {
-  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-    Some(self.as_path().cmp(other.as_path()))
-  }
-}
-
-impl Ord for ExplorerContent {
-  fn cmp(&self, other: &Self) -> Ordering {
-    self.partial_cmp(other).unwrap()
-  }
-}
-
-impl Eq for ExplorerContent {}
-
-#[derive(Debug, Default)]
-pub enum ExplorerContentState {
-  #[default]
-  Start,
-  LinesBuffer(Box<Lines<BufReader<File>>>),
-  Done,
 }

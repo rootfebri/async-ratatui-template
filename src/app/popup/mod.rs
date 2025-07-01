@@ -1,8 +1,8 @@
 use crate::ui::{center_constraints, fix_center};
 use crate::widgets::{Alert, Input};
 use crossterm::event::Event;
-use fft::state::ExplorerState;
-use fft::widget::Explorer;
+use fft::Explorer;
+use fft::ExplorerState;
 use helper::RenderEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

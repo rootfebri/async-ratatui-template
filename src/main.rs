@@ -4,7 +4,7 @@ use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, MouseEvent};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
-use helper::{EventKind, PollEvent, RenderEvent, keys};
+use helper::{PollEvent, RenderEvent, RenderKind, keys};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     } else if handled.kind.is_handled() {
       break;
     } else if handled.kind.is_warn() {
-      let EventKind::Warn(warn) = handled.kind else { unreachable!() };
+      let RenderKind::Warn(warn) = handled.kind else { unreachable!() };
       app.logs.add(Log::warn(warn.content.as_ref())).await;
     }
   }

@@ -27,14 +27,14 @@ pub async fn check(
 ) {
   logs.add(Log::info(format!("Entering new SecTrail Sequence => Data = {line}"))).await;
 
-  let mut _total_data_sequence = 0;
+  let mut total_records = 0;
   sectrail.new_sequence(line);
   loop {
     match sectrail.get().await {
       Ok(response) if response.as_records().is_empty() => break,
       Ok(response) => {
         let records = response.into_records();
-        _total_data_sequence += records.len();
+        total_records += records.len();
         for record in records {
           logs.add(Log::record(record.clone())).await;
           recorder.send(record).await.unwrap();
@@ -49,6 +49,6 @@ pub async fn check(
     }
   }
 
-  logs.info(format!("Added {_total_data_sequence} records from `{line}`")).await;
+  logs.info(format!("Added {total_records} records from `{line}`")).await;
   statistic.increment();
 }

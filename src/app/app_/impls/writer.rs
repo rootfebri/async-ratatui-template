@@ -40,17 +40,17 @@ pub async fn writer(rx: &mut MpscRx<Record>, output: &PathBuf, event: &WatchTx<R
   while let Some(bucket) = rx.recv().await {
     if let Err(err) = writer.write_all(bucket.as_csv().as_bytes()).await {
       logs.add(Log::error(err)).await;
-      event.send_modify(RenderEvent::as_handled);
+      event.send_modify(RenderEvent::make_handled);
 
       total_saved += 1;
     }
 
     if let Err(err) = writer.write_all(b"\n").await {
-      event.send_modify(RenderEvent::as_handled);
+      event.send_modify(RenderEvent::make_handled);
       logs.add(Log::error(err)).await;
     }
     if let Err(err) = writer.flush().await {
-      event.send_modify(RenderEvent::as_handled);
+      event.send_modify(RenderEvent::make_handled);
       logs.add(Log::error(err)).await;
     }
 
