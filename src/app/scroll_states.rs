@@ -12,9 +12,9 @@ impl ScrollState {
     (self.vertical, self.horizontal)
   }
 
-  pub fn auto_scroll(&mut self) {
-    if self.auto_scroll {
-      self.scroll_down();
+  pub fn auto_scroll(&mut self, max_items: usize, visible_height: usize) {
+    if self.auto_scroll && max_items > visible_height {
+      self.vertical = (max_items - visible_height) as u16;
     }
   }
 
@@ -30,11 +30,14 @@ impl ScrollState {
     self.auto_scroll = false;
   }
 
-  pub fn scroll_up_by(&mut self, len: u16) {
+  pub fn scroll_up_by(&mut self, len: u16, _max_scroll: u16) {
     self.vertical = self.vertical.saturating_sub(len);
+    self.lock();
   }
-  pub fn scroll_down_by(&mut self, len: u16) {
-    self.vertical = self.vertical.saturating_add(len);
+
+  pub fn scroll_down_by(&mut self, len: u16, max_scroll: u16) {
+    self.vertical = self.vertical.saturating_add(len).min(max_scroll);
+    self.lock();
   }
 
   pub fn scroll_left_by(&mut self, len: u16) {
@@ -44,18 +47,37 @@ impl ScrollState {
     self.horizontal = self.horizontal.saturating_add(len);
   }
 
-  pub fn scroll_up(&mut self) {
+  pub fn scroll_up(&mut self, _max_scroll: u16) {
     self.vertical = self.vertical.saturating_sub(1);
+    self.lock();
   }
-  pub fn scroll_down(&mut self) {
-    self.vertical = self.vertical.saturating_add(1);
+
+  pub fn scroll_down(&mut self, max_scroll: u16) {
+    self.vertical = self.vertical.saturating_add(1).min(max_scroll);
+    self.lock();
   }
 
   pub fn scroll_left(&mut self) {
     self.horizontal = self.horizontal.saturating_sub(1);
+    self.lock();
   }
+
   pub fn scroll_right(&mut self) {
     self.horizontal = self.horizontal.saturating_add(1);
+    self.lock();
+  }
+
+  pub fn scroll_to_bottom(&mut self, max_scroll: u16) {
+    self.vertical = max_scroll;
+    self.unlock();
+  }
+
+  pub fn max_scroll_position(&self, items_count: usize, visible_height: usize) -> u16 {
+    if items_count <= visible_height {
+      0
+    } else {
+      (items_count - visible_height) as u16
+    }
   }
 }
 

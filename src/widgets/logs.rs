@@ -25,55 +25,47 @@ pub struct Logs {
 
 impl Logs {
   pub async fn handle_key(&self, key: KeyEvent) -> Option<RenderEvent> {
+    let items_count = self.items.read().await.len();
+    let visible_height = self.known_area.area().height as usize;
+    let max_scroll = if items_count > visible_height {
+      (items_count - visible_height) as u16
+    } else {
+      0
+    };
+
     match key {
       keys!(Up, NONE, Press) => {
-        if self.items.read().await.len() > self.known_area.area().height as usize {
-          self.state.write().await.scroll_up();
+        if items_count > visible_height {
+          self.state.write().await.scroll_up(max_scroll);
           Some(RenderEvent::render())
         } else {
           None
         }
       }
       keys!(Down, NONE, Press) => {
-        if self.items.read().await.len() > self.known_area.area().height as usize {
-          self.state.write().await.scroll_down();
+        if items_count > visible_height {
+          self.state.write().await.scroll_down(max_scroll);
           Some(RenderEvent::render())
         } else {
           None
         }
       }
       keys!(PageUp, NONE, Press) => {
-        self.state.write().await.lock();
-
-        let height = self.known_area.area().height as usize;
-        let items_count = self.items.read().await.len();
-
-        if items_count > height {
-          if items_count - 10 > height {
-            self.state.write().await.scroll_up_by(10);
-          } else {
-            self.state.write().await.scroll_up_by((items_count - 10) as u16);
-          }
+        if items_count > visible_height {
+          let scroll_amount = (visible_height / 2).max(1) as u16;
+          self.state.write().await.scroll_up_by(scroll_amount, max_scroll);
           Some(RenderEvent::render())
         } else {
-          Some(RenderEvent::no_ops())
+          None
         }
       }
       keys!(PageDown, NONE, Press) => {
-        self.state.write().await.lock();
-
-        let height = self.known_area.area().height as usize;
-        let items_count = self.items.read().await.len();
-
-        if items_count > height {
-          if items_count - 10 > height {
-            self.state.write().await.scroll_up_by(10);
-          } else {
-            self.state.write().await.scroll_up_by((items_count - 10) as u16);
-          }
+        if items_count > visible_height {
+          let scroll_amount = (visible_height / 2).max(1) as u16;
+          self.state.write().await.scroll_down_by(scroll_amount, max_scroll);
           Some(RenderEvent::render())
         } else {
-          Some(RenderEvent::no_ops())
+          None
         }
       }
       keys!(Home, NONE, Press) => {
@@ -81,13 +73,12 @@ impl Logs {
         Some(RenderEvent::render())
       }
       keys!(Char(' '), CONTROL, Press) | keys!(End, NONE, Press) => {
-        {
-          let mut state = self.state.write().await;
-          state.unlock();
-          state.scroll_down_by(self.items.read().await.len() as u16);
+        if items_count > visible_height {
+          self.state.write().await.scroll_to_bottom(max_scroll);
+          Some(RenderEvent::render())
+        } else {
+          None
         }
-
-        Some(RenderEvent::render())
       }
       _ => None,
     }
@@ -102,9 +93,25 @@ impl Logs {
       return None;
     }
 
+    let items_count = self.items.read().await.len();
+    let visible_height = self.known_area.area().height as usize;
+    let max_scroll = if items_count > visible_height {
+      (items_count - visible_height) as u16
+    } else {
+      0
+    };
+
     match mouse_event.kind {
-      ScrollUp => self.state.write().await.scroll_up_by(1),
-      ScrollDown => self.state.write().await.scroll_down_by(1),
+      ScrollUp => {
+        if items_count > visible_height {
+          self.state.write().await.scroll_up_by(3, max_scroll);
+        }
+      }
+      ScrollDown => {
+        if items_count > visible_height {
+          self.state.write().await.scroll_down_by(3, max_scroll);
+        }
+      }
       _ => return None,
     }
 
@@ -121,18 +128,21 @@ impl Logs {
 
   pub async fn add(&self, log: Log) {
     let mut items = self.items.write().await;
-    {
-      let mut state = self.state.write().await;
-      if items.len() > state.vertical as usize {
-        state.auto_scroll();
-      }
-    }
+    let visible_height = self.known_area.area().height as usize;
 
     items.push_back(log);
     if items.len() > 5000 {
       items.pop_front();
     }
+
+    let items_count = items.len();
     drop(items);
+
+    // Auto-scroll if enabled and we have more items than visible
+    if items_count > visible_height {
+      let mut state = self.state.write().await;
+      state.auto_scroll(items_count, visible_height);
+    }
   }
 
   fn hotkey_labels(&self) -> Line {
@@ -161,15 +171,18 @@ impl Logs {
   }
   fn draw_logs_counter(&self) -> Line {
     let items_count = self.items.blocking_read().len();
-    let ScrollState { vertical, horizontal, .. } = *self.state.blocking_read();
+    let ScrollState { vertical, auto_scroll, .. } = *self.state.blocking_read();
+    let visible_height = self.known_area.area().height as usize;
+    let current_line = if items_count > visible_height { vertical + 1 } else { 1 };
+    let auto_indicator = if auto_scroll { "🔄" } else { "🔒" };
 
     [
       Span::raw(ratatui::symbols::line::VERTICAL_LEFT),
-      Span::raw(format!("[{vertical}/{horizontal}]")),
-      Span::raw(" "),
-      Span::styled(vertical.to_string(), Color::Gray),
+      Span::raw(format!(" {auto_indicator} ")),
+      Span::styled(current_line.to_string(), Color::Yellow),
       Span::raw("/"),
       Span::styled(items_count.to_string(), Color::White),
+      Span::raw(" "),
       Span::raw(ratatui::symbols::line::VERTICAL_RIGHT),
     ]
     .into_iter()
