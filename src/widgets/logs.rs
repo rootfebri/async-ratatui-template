@@ -6,8 +6,9 @@ use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
-use ratatui::prelude::{StatefulWidget, Widget};
-use ratatui::text::Line;
+use ratatui::prelude::{StatefulWidget, Stylize, Widget};
+use ratatui::style::Color;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListDirection, ListItem, ListState};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
@@ -95,6 +96,31 @@ impl Logs {
     items.push_back(log);
     self.maintain(items);
   }
+
+  fn hotkey_labels(&self) -> Line {
+    use ratatui::symbols::block::ONE_EIGHTH as I;
+
+    let hotkeys: Line = [
+      Span::raw(" "),
+      Span::raw("[↑/↓]").fg(Color::Green),
+      Span::raw(" Navigate"),
+      Span::raw(" "),
+      Span::raw(I),
+      Span::raw(" "),
+      Span::raw("[PgUp/PgDn]").fg(Color::Blue),
+      Span::raw(" Fast Scroll"),
+      Span::raw(" "),
+      Span::raw(I),
+      Span::raw(" "),
+      Span::raw("[Home/End]").fg(Color::Yellow),
+      Span::raw(" Jump"),
+      Span::raw(" "),
+    ]
+    .into_iter()
+    .collect();
+
+    hotkeys
+  }
 }
 
 impl Clone for Logs {
@@ -112,7 +138,9 @@ impl Widget for &Logs {
     self.known_area.replace(area);
 
     let title = Line::raw(" 📈 Activities ").left_aligned();
-    let block = blk().title_top(title);
+    let block = blk()
+      .title_top(title)
+      .title_bottom(self.hotkey_labels().centered());
     let locked_items = self.items.blocking_read();
     let items = locked_items.iter().map(ListItem::from).collect::<Vec<_>>();
     let list = List::default().items(items).block(block).direction(ListDirection::BottomToTop);
