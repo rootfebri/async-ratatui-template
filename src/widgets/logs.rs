@@ -8,7 +8,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::prelude::{StatefulWidget, Widget};
 use ratatui::text::Line;
-use ratatui::widgets::{List, ListDirection, ListState};
+use ratatui::widgets::{List, ListDirection, ListItem, ListState};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::areas::KnownArea;
@@ -114,7 +114,7 @@ impl Widget for &Logs {
     let title = Line::raw(" 📈 Activities ").left_aligned();
     let block = blk().title_top(title);
     let locked_items = self.items.blocking_read();
-    let items = locked_items.iter().map(Log::as_list_item).rev().collect::<Vec<_>>();
+    let items = locked_items.iter().map(ListItem::from).collect::<Vec<_>>();
     let list = List::default().items(items).block(block).direction(ListDirection::BottomToTop);
 
     clear(area, buf);

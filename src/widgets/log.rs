@@ -19,10 +19,6 @@ pub enum Log {
 }
 
 impl Log {
-  pub fn as_list_item(&self) -> ListItem<'_> {
-    self.into()
-  }
-
   pub fn bucket(bucket: BucketStatus) -> Self {
     Self::Bucket(bucket)
   }
