@@ -3,14 +3,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-#[cfg(not(test))]
-use clap::Parser;
 use reqwest::cookie::Jar;
 use reqwest::{Client, Url};
 
 use super::*;
+use crate::SafeRefStr;
 use crate::app::handler::sectrails::jsons::PageResponse;
-use crate::args::AppArgs;
 
 #[derive(Debug)]
 pub struct SecTrailClient {
@@ -19,16 +17,17 @@ pub struct SecTrailClient {
   client: Client,
   expired: bool,
   base_url: Url,
-  args: AppArgs,
+  email: SafeRefStr,
+  password: SafeRefStr,
 }
 impl Default for SecTrailClient {
   fn default() -> Self {
-    Self::new()
+    Self::new(Default::default(), Default::default())
   }
 }
 impl SecTrailClient {
   const BASE_URL: &'static str = "https://securitytrails.com/_next/data/";
-  pub fn new() -> Self {
+  pub fn new(email: SafeRefStr, password: SafeRefStr) -> Self {
     let base_url = Url::parse(Self::BASE_URL).unwrap();
 
     Self {
@@ -37,14 +36,8 @@ impl SecTrailClient {
       client: Default::default(),
       expired: true,
       base_url,
-      #[cfg(not(test))]
-      args: AppArgs::parse(),
-      #[cfg(test)]
-      args: AppArgs {
-        email: Some(String::from("dagelanfl@pakde.io")),
-        password: Some(String::from("Bocahkosong@588")),
-        ..Default::default()
-      },
+      email,
+      password,
     }
   }
 
@@ -86,7 +79,7 @@ impl SecTrailClient {
   }
 
   async fn new_session(&mut self) -> Result<()> {
-    let puppeteer = SecTrailPuppeteer::new(&self.args).await?;
+    let puppeteer = SecTrailPuppeteer::new(self.email.read().await, self.password.read().await).await?;
     let jar = Jar::default();
     for cookie in puppeteer.cookies {
       jar.add_cookie_str(cookie.to_cookie_str().as_str(), &self.base_url);
@@ -126,10 +119,14 @@ impl SecTrailClient {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::new_safe_str;
 
   #[tokio::test]
   async fn test_sectrail_client() {
-    let mut sectrail = SecTrailClient::new();
+    let email = new_safe_str("dagelanfl@pakde.io");
+    let password = new_safe_str("Bocahkosong@588");
+
+    let mut sectrail = SecTrailClient::new(email, password);
     let page1 = sectrail.get().await;
 
     assert!(page1.is_ok(), "{}", page1.unwrap_err());

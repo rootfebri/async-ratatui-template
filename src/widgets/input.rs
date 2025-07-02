@@ -1,20 +1,19 @@
+use crate::areas::KnownArea;
+use crate::ui::blk;
 use crossterm::event::Event;
+use fft::InputState;
 use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Stylize, Widget};
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
-
-use crate::Area;
-use crate::areas::KnownArea;
-use crate::ui::{blk, clear};
+use ratatui::widgets::Block;
+use std::cell::RefCell;
 
 #[derive(Debug)]
 pub struct Input {
-  cursor: usize,
-  value: String,
+  state: RefCell<InputState>,
   label: String,
   placeholder: String,
   known_area: KnownArea,
@@ -23,97 +22,46 @@ pub struct Input {
 impl Input {
   pub fn new(label: impl Into<Option<String>>, placeholder: impl Into<Option<String>>) -> Self {
     Self {
-      cursor: 0,
-      value: String::new(),
+      state: RefCell::new(InputState::new("")),
       label: label.into().unwrap_or(String::from("Input")).to_string(),
       placeholder: placeholder.into().unwrap_or(String::from("Start typing..")),
       known_area: Default::default(),
     }
   }
+
   pub fn handle_event(&mut self, event: &Event) -> Option<RenderEvent> {
     match event {
-      Event::Key(keys!(Backspace, NONE, Press)) => {
-        if self.cursor == 0 || self.value.is_empty() {
-          return Some(RenderEvent::no_ops());
-        }
+      Event::Key(keys!(Enter, NONE, Press)) => return Some(RenderEvent::handled()),
+      Event::Key(keys!(Esc, NONE, Press)) => return Some(RenderEvent::canceled()),
 
-        // Convert to char indices for proper Unicode handling
-        let mut chars: Vec<char> = self.value.chars().collect();
-        if self.cursor > 0 && self.cursor <= chars.len() {
-          chars.remove(self.cursor - 1);
-          self.value = chars.into_iter().collect();
-          self.cursor -= 1;
-        }
+      Event::Key(keys!(Backspace, NONE, Press)) => self.state.get_mut().backspace(),
+      Event::Key(keys!(Backspace, CONTROL, Press)) => self.state.get_mut().ctrl_backspace(),
+      Event::Key(keys!(Delete, NONE, Press)) => self.state.get_mut().delete(),
+      Event::Key(keys!(Delete, CONTROL, Press)) => self.state.get_mut().ctrl_delete(),
 
-        Some(RenderEvent::render())
-      }
-      Event::Key(keys!(Delete, NONE, Press)) => {
-        if self.value.is_empty() {
-          return Some(RenderEvent::no_ops());
-        }
+      Event::Key(keys!(Left, NONE, Press)) => self.state.get_mut().left(),
+      Event::Key(keys!(Left, CONTROL, Press)) => self.state.get_mut().move_left_word(),
+      Event::Key(keys!(Right, NONE, Press)) => self.state.get_mut().right(),
+      Event::Key(keys!(Right, CONTROL, Press)) => self.state.get_mut().move_right_word(),
 
-        let mut chars: Vec<char> = self.value.chars().collect();
-        if self.cursor < chars.len() {
-          chars.remove(self.cursor);
-          self.value = chars.into_iter().collect();
-        }
-
-        Some(RenderEvent::render())
-      }
-      Event::Key(keys!(Enter, NONE, Press)) => Some(RenderEvent::handled()),
-      Event::Key(keys!(Esc, NONE, Press)) => Some(RenderEvent::canceled()),
-      Event::Key(keys!(Left, NONE, Press)) => {
-        self.cursor = self.cursor.saturating_sub(1);
-        Some(RenderEvent::render())
-      }
-      Event::Key(keys!(Right, NONE, Press)) => {
-        let max_cursor = self.value.chars().count();
-        if self.cursor < max_cursor {
-          self.cursor += 1;
-        }
-        Some(RenderEvent::render())
-      }
-      Event::Key(keys!(Home, NONE, Press)) => {
-        self.cursor = 0;
-        Some(RenderEvent::render())
-      }
+      Event::Key(keys!(Home, NONE, Press)) => self.state.get_mut().set_cursor(0),
       Event::Key(keys!(End, NONE, Press)) => {
-        self.cursor = self.value.chars().count();
-        Some(RenderEvent::render())
+        let len = self.state.borrow().len();
+        self.state.get_mut().set_cursor(len)
       }
-      Event::Key(keys!(Char(chr), NONE, Press)) => {
-        self.insert_char(*chr);
-        Some(RenderEvent::render())
-      }
-      Event::Paste(content) => {
-        self.paste(content);
-        Some(RenderEvent::render())
-      }
-      _ => None,
-    }
-  }
-  fn insert_char(&mut self, chr: char) {
-    let mut chars: Vec<char> = self.value.chars().collect();
-    chars.insert(self.cursor, chr);
-    self.value = chars.into_iter().collect();
-    self.cursor += 1;
-  }
+      Event::Key(keys!(Char(chr), NONE, Press)) => self.state.get_mut().push(*chr),
+      Event::Paste(content) => self.state.get_mut().push_str(content),
 
-  fn paste(&mut self, content: impl AsRef<str>) {
-    let content_str = content.as_ref();
-    let mut chars: Vec<char> = self.value.chars().collect();
-
-    for (i, chr) in content_str.chars().enumerate() {
-      chars.insert(self.cursor + i, chr);
+      _ => return None,
     }
 
-    self.value = chars.into_iter().collect();
-    self.cursor += content_str.chars().count();
+    Some(RenderEvent::render())
   }
 
   pub fn value(self) -> String {
-    self.value
+    self.state.into_inner().into()
   }
+
   fn draw_label(&self) -> Line {
     Line::raw(&self.label).left_aligned().fg(Color::Cyan)
   }
@@ -121,7 +69,7 @@ impl Input {
   fn draw_block(&self) -> Block {
     use ratatui::symbols::block::ONE_EIGHTH as I;
 
-    let submit: Line = [
+    let hotkeys: Line = [
       Span::raw(" "),
       Span::raw("[ENTER]").fg(Color::Green),
       Span::raw(" Submit"),
@@ -142,86 +90,98 @@ impl Input {
 
     blk()
       .title_top(self.draw_label())
-      .title_bottom(submit.centered())
+      .title_bottom(hotkeys.centered())
       .border_style(Color::White)
   }
 
-  fn calculate_scroll_offset(&self, inner_width: usize) -> usize {
-    if inner_width == 0 {
-      return 0;
-    }
-
-    // Reserve space for cursor
-    let available_width = inner_width.saturating_sub(1);
-
-    if self.cursor < available_width {
-      0
-    } else {
-      self.cursor.saturating_sub(available_width)
-    }
-  }
-  #[inline(always)]
-  fn cursor(&self) -> Span {
-    Span::raw("│").fg(Color::Yellow).bg(Color::DarkGray)
-  }
-  fn draw_input(&self, area: Area, buf: &mut Buffer) {
+  fn draw_input(&self, area: Rect, buf: &mut Buffer) {
     let block = self.draw_block();
     let inner = block.inner(area);
+    block.render(area, buf);
 
-    // Calculate available width for text
-    let inner_width = inner.width as usize;
-    let scroll_offset = self.calculate_scroll_offset(inner_width);
+    if inner.height == 0 || inner.width == 0 {
+      return;
+    }
 
-    let spans = if self.value.is_empty() {
-      // Show placeholder and cursor
-      vec![Span::from(self.placeholder.as_str()).fg(Color::DarkGray).italic(), self.cursor()]
+    let state = self.state.borrow();
+    let text = state.as_str();
+    let cursor_pos = state.cursor();
+
+    // Determine what to display
+    let (display_text, cursor_style, text_style) = if text.is_empty() {
+      // Show placeholder when empty
+      (self.placeholder.as_str(), Color::DarkGray, Color::DarkGray)
     } else {
-      let chars: Vec<char> = self.value.chars().collect();
-      let mut result_spans = Vec::new();
-
-      // Apply horizontal scrolling
-      let visible_start = scroll_offset;
-      let visible_end = (scroll_offset + inner_width.saturating_sub(1)).min(chars.len());
-
-      // Determine cursor position relative to visible area
-      let cursor_in_view = self.cursor >= visible_start && self.cursor <= visible_end;
-      let relative_cursor = self.cursor.saturating_sub(visible_start);
-
-      if visible_start < chars.len() {
-        // Add visible text before cursor
-        if cursor_in_view && relative_cursor > 0 {
-          let before_cursor: String = chars[visible_start..visible_start + relative_cursor].iter().collect();
-          if !before_cursor.is_empty() {
-            result_spans.push(Span::from(before_cursor).fg(Color::White));
-          }
-        }
-
-        // Add cursor
-        if cursor_in_view {
-          result_spans.push(self.cursor());
-        }
-
-        // Add visible text after cursor
-        if cursor_in_view && visible_start + relative_cursor < visible_end {
-          let after_cursor: String = chars[visible_start + relative_cursor..visible_end].iter().collect();
-          if !after_cursor.is_empty() {
-            result_spans.push(Span::from(after_cursor).fg(Color::White));
-          }
-        } else if !cursor_in_view {
-          // Cursor is not in view, just show the visible text
-          let visible_text: String = chars[visible_start..visible_end].iter().collect();
-          result_spans.push(Span::from(visible_text).fg(Color::White));
-        }
-      } else if cursor_in_view {
-        // Only cursor is visible (at end of text)
-        result_spans.push(self.cursor());
-      }
-
-      result_spans
+      // Show actual text
+      (text, Color::Yellow, Color::White)
     };
 
-    clear(area, buf);
-    Paragraph::new(Line::from_iter(spans)).block(block).render(area, buf);
+    // Calculate visible text area (leave space for cursor)
+    let text_area = Rect {
+      x: inner.x + 1,
+      y: inner.y + (inner.height / 2),
+      width: inner.width.saturating_sub(2),
+      height: 1,
+    };
+
+    if text_area.width == 0 {
+      return;
+    }
+
+    // Handle text scrolling if it's too long
+    let max_visible_chars = text_area.width as usize;
+    let (visible_text, visible_cursor_pos) = if display_text.chars().count() > max_visible_chars {
+      let cursor_char_pos = text[..cursor_pos.min(text.len())].chars().count();
+
+      // Calculate scroll offset to keep cursor visible
+      let scroll_offset = if cursor_char_pos >= max_visible_chars {
+        cursor_char_pos.saturating_sub(max_visible_chars - 1)
+      } else {
+        0
+      };
+
+      let visible: String = display_text
+        .chars()
+        .skip(scroll_offset)
+        .take(max_visible_chars)
+        .collect();
+
+      let visible_cursor = cursor_char_pos.saturating_sub(scroll_offset);
+      (visible, visible_cursor)
+    } else {
+      let cursor_char_pos = if text.is_empty() { 0 } else { text[..cursor_pos.min(text.len())].chars().count() };
+      (display_text.to_string(), cursor_char_pos)
+    };
+
+    // Render the text
+    let text_line = Line::raw(&visible_text).style(text_style);
+    text_line.render(text_area, buf);
+
+    // Render cursor only if we're showing actual text (not placeholder)
+    if !text.is_empty() || visible_cursor_pos == 0 {
+      let cursor_x = text_area.x + visible_cursor_pos as u16;
+      if cursor_x < text_area.x + text_area.width {
+        // Render cursor as a highlighted character or block
+        let cursor_char = if visible_cursor_pos < visible_text.chars().count() {
+          visible_text.chars().nth(visible_cursor_pos).unwrap_or(' ')
+        } else {
+          ' '
+        };
+
+        let cursor_span = Span::raw(cursor_char.to_string())
+          .bg(cursor_style)
+          .fg(Color::Black);
+
+        let cursor_line = Line::from(cursor_span);
+        let cursor_area = Rect {
+          x: cursor_x,
+          y: text_area.y,
+          width: 1,
+          height: 1,
+        };
+        cursor_line.render(cursor_area, buf);
+      }
+    }
   }
 }
 

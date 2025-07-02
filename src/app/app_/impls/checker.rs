@@ -1,15 +1,21 @@
-use std::sync::Arc;
-
 use helper::RenderEvent;
+use std::sync::Arc;
 
 use crate::app::handler::sectrails::SecTrailClient;
 use crate::app::handler::sectrails::jsons::Record;
 use crate::app::{MpscRx, MpscTx, WatchTx};
 use crate::widgets::{Log, Logs, Statistic};
-use crate::{never, wait_process};
-
-pub async fn line_checker(mut line_rx: MpscRx<Arc<str>>, bucket_tx: MpscTx<Record>, event: WatchTx<RenderEvent>, logs: Logs, statistic: Statistic) {
-  let mut sectrail = SecTrailClient::new();
+use crate::{SafeRefStr, never, wait_process};
+pub async fn line_checker(
+  mut line_rx: MpscRx<Arc<str>>,
+  bucket_tx: MpscTx<Record>,
+  event: WatchTx<RenderEvent>,
+  logs: Logs,
+  statistic: Statistic,
+  email: SafeRefStr,
+  password: SafeRefStr,
+) {
+  let mut sectrail = SecTrailClient::new(email, password);
 
   while let Some(line) = line_rx.recv().await {
     wait_process!();

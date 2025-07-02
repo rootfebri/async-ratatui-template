@@ -40,7 +40,7 @@ impl AppArgs {
     if self.fps == 0 {
       tokio::time::interval(tokio::time::Duration::from_secs(60)) // 60 seconds interval if FPS is 0
     } else {
-      tokio::time::interval(tokio::time::Duration::from_millis(1000 / self.fps.max(1) as u64))
+      tokio::time::interval(tokio::time::Duration::from_millis(1000 / self.fps.max(5) as u64))
     }
   }
 }

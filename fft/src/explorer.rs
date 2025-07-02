@@ -41,7 +41,7 @@ impl<'s> Explorer<'s> {
       .state
       .blocking_read_items()
       .iter()
-      .map(|item| ListItem::new(item.apply_colors(self.state.input.as_str())))
+      .map(|item| ListItem::new(item.apply_colors(self.state.input_state.as_str())))
       .collect::<List>()
       .block(self.file_block.take().unwrap_or_else(|| self.give_file_block()))
       .highlight_spacing(HighlightSpacing::Always)
@@ -59,7 +59,7 @@ impl<'s> Explorer<'s> {
   }
 
   fn draw_input(&mut self) -> impl Widget {
-    let input = self.state.input.as_str();
+    let input = self.state.input_state.as_str();
     let cursor_byte_pos = self.state.cursor.min(input.len()); // Clamp cursor to valid range
     let mut spans = Line::default();
 

@@ -1,5 +1,3 @@
-use std::io::{Result, stdout};
-
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, MouseEvent};
 use crossterm::execute;
@@ -8,8 +6,10 @@ use helper::{PollEvent, RenderEvent, RenderKind, keys};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
+use std::io::{Result, stdout};
+use std::sync::Arc;
 use tokio::select;
-use tokio::sync::Semaphore;
+use tokio::sync::{RwLock, Semaphore};
 use tokio::task::block_in_place;
 
 use crate::app::{App, SYNC_STATE};
@@ -118,4 +118,9 @@ async fn test_widget(
   }
 
   Ok(())
+}
+pub type SafeRefStr = Arc<RwLock<Arc<str>>>;
+
+pub fn new_safe_str(value: impl Into<Arc<str>>) -> SafeRefStr {
+  Arc::new(RwLock::new(value.into()))
 }

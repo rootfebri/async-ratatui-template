@@ -6,8 +6,6 @@ use reqwest::header::HeaderMap;
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::args::AppArgs;
-
 #[derive(Debug, Clone)]
 pub struct SecTrailPuppeteer {
   pub success: bool,
@@ -18,16 +16,11 @@ pub struct SecTrailPuppeteer {
 }
 
 impl SecTrailPuppeteer {
-  pub async fn new(args: &AppArgs) -> Result<Self> {
+  pub async fn new(email: impl ToString, password: impl ToString) -> Result<Self> {
     setup_bun().await?;
 
     let cmd = Command::new("bun")
-      .args([
-        String::from("run"),
-        String::from("index.ts"),
-        args.email.clone().unwrap_or_default(),
-        args.password.clone().unwrap_or_default(),
-      ])
+      .args([String::from("run"), String::from("index.ts"), email.to_string(), password.to_string()])
       .kill_on_drop(true)
       .stdout(Stdio::inherit())
       .stderr(Stdio::inherit())
@@ -171,13 +164,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_puppeteer() {
-    let args = AppArgs {
-      email: Some(String::from("dagelanfl@pakde.io")),
-      password: Some(String::from("Bocahkosong@588")),
-      ..Default::default()
-    };
-
-    let puppeteer = SecTrailPuppeteer::new(&args).await;
+    let puppeteer = SecTrailPuppeteer::new("dagelanfl@pakde.io", "Bocahkosong@588").await;
     assert!(puppeteer.is_ok(), "{}", puppeteer.unwrap_err());
   }
 }

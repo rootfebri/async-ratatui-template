@@ -12,3 +12,16 @@ pub enum PulseFps {
   /// 90
   VeryHigh = 90,
 }
+
+impl From<u8> for PulseFps {
+  fn from(value: u8) -> Self {
+    match value {
+      0..=15 => Self::Low,
+      16..=30 => Self::Low,
+      31..=45 => Self::Low,
+      46..=60 => Self::Low,
+      61..=90 => Self::Low,
+      _ => Self::Low,
+    }
+  }
+}

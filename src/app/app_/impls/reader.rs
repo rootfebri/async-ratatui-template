@@ -18,9 +18,6 @@ pub async fn input_reader(
   logs: Logs,
   statistic: Statistic,
 ) {
-  let info = format!("Input reader spawn with `{}` value", watched_input.borrow_and_update().display());
-  logs.add(Log::info(info)).await;
-
   let mut input = watched_input.borrow_and_update().clone();
 
   loop {
