@@ -4,7 +4,7 @@ use helper::RenderEvent;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, select};
 
-use crate::app::app_::impls::change_listener;
+use crate::app::app::impls::change_listener;
 use crate::app::handler::sectrails::jsons::Record;
 use crate::app::{MpscRx, WatchTx};
 use crate::widgets::{Log, Logs};

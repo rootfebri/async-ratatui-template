@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use super::*;
 use crate::ARGS;
-use crate::app::app_::impls::checker::line_checker;
-use crate::app::app_::impls::reader::input_reader;
-use crate::app::app_::impls::writer::output_writer;
+use crate::app::app::impls::checker::line_checker;
+use crate::app::app::impls::reader::input_reader;
+use crate::app::app::impls::writer::output_writer;
 use crate::args::AppArgs;
 use crate::widgets::Statistic;
 
@@ -28,7 +28,6 @@ impl Default for App {
       tasks,
       event_watcher,
       focus: true,
-      scrols: ScrollStates::default(),
       logs,
       statistic,
     }

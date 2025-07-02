@@ -8,7 +8,8 @@ type MpscTx<T> = mpsc::Sender<T>;
 
 pub mod handler;
 
-mod app_;
+#[allow(clippy::module_inception)]
+mod app;
 mod exports;
 mod popup;
 mod scroll_states;

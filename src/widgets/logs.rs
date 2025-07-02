@@ -1,26 +1,25 @@
 use std::collections::VecDeque;
-use std::ops::DerefMut;
 use std::sync::Arc;
 
-use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
-use helper::{RenderEvent, keys};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Position, Rect};
-use ratatui::prelude::{StatefulWidget, Stylize, Widget};
-use ratatui::style::Color;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListDirection, ListItem, ListState};
-use tokio::sync::{RwLock, RwLockWriteGuard};
-
+use crate::app::ScrollState;
 use crate::areas::KnownArea;
 use crate::mouse_area;
 use crate::ui::{blk, clear};
 use crate::widgets::Log;
+use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
+use helper::{RenderEvent, keys};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Position, Rect};
+use ratatui::prelude::{Stylize, Text, Widget};
+use ratatui::style::Color;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct Logs {
   items: Arc<RwLock<VecDeque<Log>>>,
-  state: Arc<RwLock<ListState>>,
+  state: Arc<RwLock<ScrollState>>,
   known_area: KnownArea,
 }
 
@@ -28,30 +27,66 @@ impl Logs {
   pub async fn handle_key(&self, key: KeyEvent) -> Option<RenderEvent> {
     match key {
       keys!(Up, NONE, Press) => {
-        self.state.write().await.scroll_up_by(1);
-        Some(RenderEvent::render())
+        if self.items.read().await.len() > self.known_area.area().height as usize {
+          self.state.write().await.scroll_up();
+          Some(RenderEvent::render())
+        } else {
+          None
+        }
       }
       keys!(Down, NONE, Press) => {
-        self.state.write().await.scroll_down_by(1);
-        Some(RenderEvent::render())
+        if self.items.read().await.len() > self.known_area.area().height as usize {
+          self.state.write().await.scroll_down();
+          Some(RenderEvent::render())
+        } else {
+          None
+        }
       }
       keys!(PageUp, NONE, Press) => {
-        self.state.write().await.scroll_up_by(10);
-        Some(RenderEvent::render())
+        self.state.write().await.lock();
+
+        let height = self.known_area.area().height as usize;
+        let items_count = self.items.read().await.len();
+
+        if items_count > height {
+          if items_count - 10 > height {
+            self.state.write().await.scroll_up_by(10);
+          } else {
+            self.state.write().await.scroll_up_by((items_count - 10) as u16);
+          }
+          Some(RenderEvent::render())
+        } else {
+          Some(RenderEvent::no_ops())
+        }
       }
       keys!(PageDown, NONE, Press) => {
-        self.state.write().await.scroll_down_by(10);
-        Some(RenderEvent::render())
+        self.state.write().await.lock();
+
+        let height = self.known_area.area().height as usize;
+        let items_count = self.items.read().await.len();
+
+        if items_count > height {
+          if items_count - 10 > height {
+            self.state.write().await.scroll_up_by(10);
+          } else {
+            self.state.write().await.scroll_up_by((items_count - 10) as u16);
+          }
+          Some(RenderEvent::render())
+        } else {
+          Some(RenderEvent::no_ops())
+        }
       }
       keys!(Home, NONE, Press) => {
-        let items_count = self.items.read().await.len();
-        if items_count > 0 {
-          self.state.write().await.select(Some(items_count - 1));
-        }
+        self.state.write().await.scroll_to_top();
         Some(RenderEvent::render())
       }
-      keys!(End, NONE, Press) => {
-        self.state.write().await.select(Some(0));
+      keys!(Char(' '), CONTROL, Press) | keys!(End, NONE, Press) => {
+        {
+          let mut state = self.state.write().await;
+          state.unlock();
+          state.scroll_down_by(self.items.read().await.len() as u16);
+        }
+
         Some(RenderEvent::render())
       }
       _ => None,
@@ -80,21 +115,24 @@ impl Logs {
     self.known_area.intersects(position)
   }
 
-  fn maintain(&self, mut w_guard: RwLockWriteGuard<VecDeque<Log>>) {
-    if w_guard.len() > 5000 {
-      w_guard.pop_front();
-    }
-  }
   pub async fn info(&self, data: impl Into<Arc<str>>) {
-    let mut items = self.items.write().await;
-    items.push_back(Log::info(data));
-    self.maintain(items);
+    self.add(Log::info(data)).await;
   }
 
   pub async fn add(&self, log: Log) {
     let mut items = self.items.write().await;
+    {
+      let mut state = self.state.write().await;
+      if items.len() > state.vertical as usize {
+        state.auto_scroll();
+      }
+    }
+
     items.push_back(log);
-    self.maintain(items);
+    if items.len() > 5000 {
+      items.pop_front();
+    }
+    drop(items);
   }
 
   fn hotkey_labels(&self) -> Line {
@@ -121,15 +159,21 @@ impl Logs {
 
     hotkeys
   }
-}
+  fn draw_logs_counter(&self) -> Line {
+    let items_count = self.items.blocking_read().len();
+    let ScrollState { vertical, horizontal, .. } = *self.state.blocking_read();
 
-impl Clone for Logs {
-  fn clone(&self) -> Self {
-    Self {
-      items: Arc::clone(&self.items),
-      state: Default::default(),
-      known_area: Default::default(),
-    }
+    [
+      Span::raw(ratatui::symbols::line::VERTICAL_LEFT),
+      Span::raw(format!("[{vertical}/{horizontal}]")),
+      Span::raw(" "),
+      Span::styled(vertical.to_string(), Color::Gray),
+      Span::raw("/"),
+      Span::styled(items_count.to_string(), Color::White),
+      Span::raw(ratatui::symbols::line::VERTICAL_RIGHT),
+    ]
+    .into_iter()
+    .collect::<Line>()
   }
 }
 
@@ -138,14 +182,28 @@ impl Widget for &Logs {
     self.known_area.replace(area);
 
     let title = Line::raw(" 📈 Activities ").left_aligned();
+    let logs_counter = self.draw_logs_counter().right_aligned();
+
     let block = blk()
       .title_top(title)
+      .title_bottom(logs_counter)
       .title_bottom(self.hotkey_labels().centered());
+
     let locked_items = self.items.blocking_read();
-    let items = locked_items.iter().map(ListItem::from).collect::<Vec<_>>();
-    let list = List::default().items(items).block(block).direction(ListDirection::BottomToTop);
+    let lines: Text = locked_items.iter().map(Line::from).collect();
+    let widget = Paragraph::new(lines).block(block).scroll(self.state.blocking_read().as_tuple());
 
     clear(area, buf);
-    StatefulWidget::render(list, area, buf, self.state.blocking_write().deref_mut());
+    widget.render(area, buf);
+  }
+}
+
+impl Clone for Logs {
+  fn clone(&self) -> Self {
+    Self {
+      items: Arc::clone(&self.items),
+      state: Arc::clone(&self.state),
+      known_area: self.known_area.clone(),
+    }
   }
 }

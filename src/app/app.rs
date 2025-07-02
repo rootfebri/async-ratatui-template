@@ -31,7 +31,6 @@ pub struct App {
   // App data
   focus: bool,
   change_mode: Option<InOutChangeMode>,
-  scrols: ScrollStates,
   statistic: Statistic,
 
   pub logs: Logs,
@@ -187,7 +186,6 @@ impl App {
     Paragraph::new(Line::raw(input_value).fg(Color::LightCyan))
       .block(block)
       .wrap(Wrap { trim: true })
-      .scroll(self.scrols.input_widget)
   }
 
   fn draw_output_widget(&self) -> impl Widget {
@@ -203,7 +201,6 @@ impl App {
     Paragraph::new(Line::raw(input_value).fg(Color::Blue))
       .block(block)
       .wrap(Wrap { trim: true })
-      .scroll(self.scrols.output_widget)
   }
 
   fn draw_email_widget(&self) -> impl Widget {
@@ -232,8 +229,8 @@ impl Widget for &App {
     }
 
     let [controls, activity] = Layout::vertical([Constraint::Percentage(30), Constraint::Percentage(70)]).areas(area);
-    let controls = Layout::horizontal([Constraint::Percentage(60), Constraint::Fill(1)]).split(controls);
-    let [input_area, output_area, email_area, password_area] = Layout::vertical([Constraint::Length(3); 4]).areas(controls[0]);
+    let controls = Layout::horizontal([Constraint::Min(3 * 4), Constraint::Fill(1)]).split(controls);
+    let [input_area, output_area, email_area, password_area] = Layout::vertical([Constraint::Max(3); 4]).areas(controls[0]);
 
     tokio::task::block_in_place(|| {
       clear(input_area, buf);
