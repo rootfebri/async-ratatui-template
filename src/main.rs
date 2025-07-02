@@ -1,12 +1,15 @@
+use std::io::{Result, stdout};
+
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, MouseEvent};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use helper::{PollEvent, RenderEvent, RenderKind, keys};
+#[cfg(debug_assertions)]
+use rand::Rng;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
-use std::io::{Result, stdout};
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::task::block_in_place;
@@ -19,11 +22,11 @@ pub static ARGS: RwLock<AppArgs> = RwLock::const_new(AppArgs {
   fps: 0,
   email: None,
   password: None,
-  headless: false,
   username: None,
   input: None,
   output: None,
 });
+
 pub type Area = Rect;
 
 pub mod app;
@@ -31,6 +34,63 @@ pub mod areas;
 pub mod args;
 pub mod ui;
 pub mod widgets;
+
+#[cfg(debug_assertions)]
+async fn add_random_debug_log(app: &App) {
+  let mut rng = rand::rng();
+  let log_type = rng.random_range(0..4);
+
+  match log_type {
+    0 => {
+      let messages = [
+        "Debug: Processing bucket data",
+        "Debug: Checking connection status",
+        "Debug: Validating credentials",
+        "Debug: Scanning for updates",
+        "Debug: Refreshing UI components",
+        "Debug: Memory usage check",
+        "Debug: Network latency test",
+        "Debug: Cache cleanup initiated",
+      ];
+      let message = messages[rng.random_range(0..messages.len())];
+      app.logs.info(message).await;
+    }
+    1 => {
+      let warnings = [
+        "Debug: High memory usage detected",
+        "Debug: Slow network response",
+        "Debug: Cache size approaching limit",
+        "Debug: Temporary file cleanup needed",
+        "Debug: Connection timeout warning",
+        "Debug: Rate limit approaching",
+      ];
+      let warning = warnings[rng.random_range(0..warnings.len())];
+      app.logs.add(Log::warn(warning)).await;
+    }
+    2 => {
+      let errors = [
+        "Debug: Simulated connection error",
+        "Debug: Mock authentication failure",
+        "Debug: Fake timeout error",
+        "Debug: Test validation error",
+        "Debug: Simulated network error",
+      ];
+      let error = errors[rng.random_range(0..errors.len())];
+      app.logs.add(Log::error(anyhow::anyhow!(error))).await;
+    }
+    _ => {
+      let activities = [
+        "Debug: Random activity logged",
+        "Debug: Background task completed",
+        "Debug: System health check passed",
+        "Debug: Configuration updated",
+        "Debug: Service status verified",
+      ];
+      let activity = activities[rng.random_range(0..activities.len())];
+      app.logs.info(activity).await;
+    }
+  }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -51,6 +111,9 @@ async fn main() -> anyhow::Result<()> {
   while status.is_ok() && !SYNC_STATE.is_exiting() {
     let handled = select! {
       _ = fps.tick() => {
+        #[cfg(debug_assertions)]
+        add_random_debug_log(&app).await;
+
         terminal.draw(|frame| frame.render_widget(&app, frame.area()))?;
         continue;
       },

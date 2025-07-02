@@ -1,19 +1,20 @@
-use crate::ui::{center_constraints, clear, fix_center};
-use crate::widgets::{Alert, Input};
+use std::cell::RefCell;
+use std::ops::DerefMut;
+
 use crossterm::event::Event;
-use fft::Explorer;
-use fft::ExplorerState;
+use fft::{Explorer, ExplorerState};
 use helper::RenderEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Constraint, Widget};
 use ratatui::widgets::Paragraph;
-use std::cell::RefCell;
-use std::ops::DerefMut;
+
+use crate::ui::{center_constraints, clear, fix_center};
+use crate::widgets::{Alert, Confirmation, Input};
 
 pub enum Popup {
   Input(Input),
-  Confirmation(Paragraph<'static>),
+  Confirmation(Confirmation),
   Warning(Paragraph<'static>),
   Alert(Alert),
   FileExplorer(RefCell<ExplorerState>),
@@ -23,7 +24,7 @@ impl Popup {
   pub async fn handle_event(&mut self, event: &Event) -> Option<RenderEvent> {
     match *self {
       Popup::Input(ref mut input) => input.handle_event(event),
-      Popup::Confirmation(_) => todo!(),
+      Popup::Confirmation(ref mut modal) => modal.handle_key(event.as_key_event()?),
       Popup::Warning(_) => todo!(),
       Popup::Alert(ref mut alert) => alert.handle_event(event),
       Popup::FileExplorer(ref mut explore_state) => match event {
@@ -37,7 +38,7 @@ impl Popup {
   pub fn area(&self, area: Rect) -> Rect {
     match *self {
       Popup::Input(_) => center_constraints(area, Constraint::Min(55), Constraint::Length(15)),
-      Popup::Confirmation(_) => fix_center(area, 45, 25),
+      Popup::Confirmation(..) => center_constraints(area, Constraint::Length(55), Constraint::Length(7)),
       Popup::Warning(_) => fix_center(area, 15, 15),
       Popup::Alert(_) => fix_center(area, 25, 25),
       Popup::FileExplorer(_) => center_constraints(area, Constraint::Percentage(80), Constraint::Percentage(90)),
@@ -54,7 +55,8 @@ impl Widget for &Popup {
 
     match self {
       Popup::Input(widget) => widget.render(area, buf),
-      Popup::Confirmation(widget) | Popup::Warning(widget) => {
+      Popup::Confirmation(modal) => modal.render(area, buf),
+      Popup::Warning(widget) => {
         clear(area, buf);
         widget.render(area, buf);
       }

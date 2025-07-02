@@ -1,15 +1,16 @@
-use super::*;
-use crate::ARGS;
-use crate::ui::{blk, clear};
-use crate::widgets::{Input, Logs, Statistic};
 use crossterm::event::{Event, KeyEvent};
 use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::prelude::{Line, Stylize, Widget};
-use ratatui::style::{Color, Style};
+use ratatui::style::Color;
 use ratatui::widgets::{Paragraph, Wrap};
 use tokio::task::JoinSet;
+
+use super::*;
+use crate::ui::{blk, clear};
+use crate::widgets::{Confirmation, Input, Log, Logs, Statistic, line_with_hotkey};
+use crate::{ARGS, app_action};
 
 mod impls;
 
@@ -57,8 +58,8 @@ impl App {
           return handled;
         }
 
-        if let Some(unhandled_event) = self.handle_key(key).await {
-          return unhandled_event;
+        if let Some(render_event) = self.handle_key(key).await {
+          return render_event;
         }
       }
       Event::Mouse(mouse) => {
@@ -73,51 +74,45 @@ impl App {
   }
 
   async fn try_handle_popup(&mut self, event: &Event) -> Option<RenderEvent> {
-    if let Some(popup) = self.popup.as_mut()
-      && let Some(handled) = popup.handle_event(event).await
-    {
-      if handled.kind.is_handled() {
-        match self.popup.take().unwrap() {
-          Popup::Input(input) => {
-            return match self.change_mode {
-              Some(InOutChangeMode::Email) => {
-                ARGS.write().await.email = Some(input.value());
-                Some(RenderEvent::render())
-              }
-              Some(InOutChangeMode::Password) => {
-                ARGS.write().await.password = Some(input.value());
-                Some(RenderEvent::render())
-              }
-              _ => Some(RenderEvent::no_ops()),
-            };
-          }
-          Popup::Confirmation(_) => todo!(),
-          Popup::Warning(_) => todo!(),
-          Popup::Alert(_) => return Some(RenderEvent::render()),
-          Popup::FileExplorer(state) => {
-            return match self.change_mode {
-              Some(InOutChangeMode::Input) => {
-                ARGS.write().await.input = state.take().get().await;
-                return Some(RenderEvent::render());
-              }
-              Some(InOutChangeMode::Output) => {
-                ARGS.write().await.output = state.take().get().await;
-                Some(RenderEvent::render())
-              }
-              _ => Some(RenderEvent::no_ops()),
-            };
-          }
-        }
-      } else if handled.kind.is_canceled() {
-        self.popup.take();
+    let popup = self.popup.as_mut()?;
+    let handled = popup.handle_event(event).await?;
 
-        return Some(RenderEvent::render());
-      } else {
-        return Some(handled);
+    if handled.kind.is_handled() {
+      match self.popup.take()? {
+        Popup::Input(input) => match self.change_mode {
+          Some(InOutChangeMode::Email) => {
+            ARGS.write().await.email = Some(input.value());
+            Some(RenderEvent::render())
+          }
+          Some(InOutChangeMode::Password) => {
+            ARGS.write().await.password = Some(input.value());
+            Some(RenderEvent::render())
+          }
+          _ => Some(RenderEvent::no_ops()),
+        },
+        Popup::Confirmation(confirmation) => confirmation.call_submit(self).await,
+        Popup::Warning(_) => todo!(),
+        Popup::Alert(_) => Some(RenderEvent::render()),
+        Popup::FileExplorer(state) => match self.change_mode {
+          Some(InOutChangeMode::Input) => {
+            ARGS.write().await.input = state.take().get().await;
+            Some(RenderEvent::render())
+          }
+          Some(InOutChangeMode::Output) => {
+            ARGS.write().await.output = state.take().get().await;
+            Some(RenderEvent::render())
+          }
+          _ => Some(RenderEvent::no_ops()),
+        },
       }
+    } else if handled.kind.is_canceled() {
+      match self.popup.take()? {
+        Popup::Confirmation(modal) => modal.call_cancel(self).await,
+        _ => Some(RenderEvent::render()),
+      }
+    } else {
+      Some(handled)
     }
-
-    None
   }
 
   async fn handle_key(&mut self, key: KeyEvent) -> Option<RenderEvent> {
@@ -148,12 +143,28 @@ impl App {
         self.change_mode = Some(InOutChangeMode::Output);
         Some(RenderEvent::render())
       }
-      keys!(Char('s'), NONE, Press) => {
+      keys!(Char('s'), CONTROL, Press) => {
         SYNC_STATE.process();
         Some(RenderEvent::render())
       }
       keys!(Char('c'), CONTROL, Press) => {
-        SYNC_STATE.exit();
+        if SYNC_STATE.is_processing() {
+          let on_cancel = app_action!(async |_app| RenderEvent::render());
+          let on_submit = app_action!(async |app| {
+            app.logs.add(Log::warn("Force exiting...")).await;
+            SYNC_STATE.exit();
+            RenderEvent::render()
+          });
+
+          let state = Confirmation::new("There is still a background process...".to_string())
+            .title(String::from("Are you sure?"))
+            .on_cancel(on_cancel)
+            .on_submit(on_submit);
+          self.popup = Some(Popup::Confirmation(state));
+        } else {
+          SYNC_STATE.exit();
+        }
+
         Some(RenderEvent::render())
       }
       keys!(Esc, NONE, Press) => {
@@ -165,10 +176,8 @@ impl App {
   }
 
   fn draw_input_widget(&self) -> impl Widget {
-    let block = blk()
-      .title_top(Line::raw(" Input File: ").fg(Color::White))
-      .title_alignment(Alignment::Left)
-      .fg(Color::Yellow);
+    let label: Line = line_with_hotkey("Input File:", true, Color::Red, Color::White);
+    let block = blk().title_top(label.fg(Color::White)).title_alignment(Alignment::Left).fg(Color::Yellow);
     let input_value = if let Some(ref path) = ARGS.blocking_read().input {
       path.display().to_string()
     } else {
@@ -182,10 +191,8 @@ impl App {
   }
 
   fn draw_output_widget(&self) -> impl Widget {
-    let block = blk()
-      .title_top(Line::raw(" Output File: ").fg(Color::White))
-      .title_alignment(Alignment::Left)
-      .fg(Color::Yellow);
+    let label: Line = line_with_hotkey("Output File:", true, Color::Red, Color::White);
+    let block = blk().title_top(label).title_alignment(Alignment::Left).fg(Color::Yellow);
 
     let input_value = if let Some(ref path) = ARGS.blocking_read().output {
       path.display().to_string()
@@ -200,19 +207,16 @@ impl App {
   }
 
   fn draw_email_widget(&self) -> impl Widget {
-    let block = blk()
-      .fg(Color::Red)
-      .title_top(Line::styled(" ✉️ Email ", Style::new()).left_aligned().fg(Color::White));
+    let label = line_with_hotkey("Email 📧", true, Color::Red, Color::White);
+    let block = blk().fg(Color::Red).title_top(label.left_aligned().fg(Color::White));
 
     Paragraph::new(Line::raw(ARGS.blocking_read().email.clone().unwrap_or_default()).fg(Color::DarkGray)).block(block)
   }
 
   fn draw_password_widget(&self) -> impl Widget {
+    let label = line_with_hotkey("Password 🔑", true, Color::Red, Color::White);
     let pwd_len = ARGS.blocking_read().password.as_ref().map(String::len).unwrap_or_default();
-
-    let block = blk()
-      .fg(Color::Red)
-      .title_top(Line::styled(" 🔑 Password ", Style::new()).left_aligned().fg(Color::White));
+    let block = blk().fg(Color::Red).title_top(label.left_aligned().fg(Color::White));
 
     Paragraph::new(Line::raw("*".repeat(pwd_len)).fg(Color::DarkGray)).block(block)
   }

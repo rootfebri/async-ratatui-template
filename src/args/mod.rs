@@ -18,10 +18,6 @@ pub struct AppArgs {
   #[arg(short, long)]
   pub password: Option<String>,
 
-  /// Headless will be used by this app
-  #[arg(long, default_value = "false")]
-  pub headless: bool,
-
   /// Username will be used by this app
   #[arg(short, long)]
   pub username: Option<String>,
@@ -38,9 +34,9 @@ pub struct AppArgs {
 impl AppArgs {
   pub fn create_fps_interval(&self) -> Interval {
     if self.fps == 0 {
-      tokio::time::interval(tokio::time::Duration::from_secs(60)) // 60 seconds interval if FPS is 0
+      tokio::time::interval(tokio::time::Duration::from_secs(60)) // 1 seconds interval if FPS is 0
     } else {
-      tokio::time::interval(tokio::time::Duration::from_millis(1000 / self.fps.max(5) as u64))
+      tokio::time::interval(tokio::time::Duration::from_millis(1000 / self.fps as u64))
     }
   }
 }

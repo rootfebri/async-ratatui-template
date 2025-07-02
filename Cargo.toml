@@ -50,4 +50,5 @@ devicons = { workspace = true }
 chrono = { workspace = true }
 helper = { path = "helper" }
 fft = { path = "fft" }
+rand = "0.9.1"
 

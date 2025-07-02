@@ -9,6 +9,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Style, Stylize, Widget};
 use ratatui::symbols::DOT;
 use ratatui::symbols::border::Set;
+use ratatui::symbols::line::{VERTICAL_LEFT, VERTICAL_RIGHT};
 use ratatui::text::{Line, Span, ToLine};
 use ratatui::widgets::LineGauge;
 
@@ -116,13 +117,40 @@ impl Statistic {
       horizontal_bottom: "─",
     };
 
-    let main_block = blk().title_top(title_top_line).border_set(main_border_set).border_style(Style {
-      fg: Some(Color::Rgb(255, 102, 0)),
-      ..Default::default()
-    });
+    let main_block = blk()
+      .title_top(title_top_line)
+      .title_bottom(self.hotkeys().centered())
+      .border_set(main_border_set)
+      .border_style(Style {
+        fg: Some(Color::Rgb(255, 102, 0)),
+        ..Default::default()
+      });
 
     (&main_block).render(area, buf);
     main_block.inner(area)
+  }
+
+  fn hotkeys(&self) -> Line {
+    let (state, state_hk) = if SYNC_STATE.is_processing() {
+      (Span::styled("Stop", Color::White), Span::styled("<C-p> ", Color::Red))
+    } else {
+      (Span::styled("Start", Color::White), Span::styled("<C-s> ", Color::Red))
+    };
+
+    [
+      Span::raw(VERTICAL_LEFT),
+      state_hk,
+      state,
+      Span::raw(VERTICAL_RIGHT),
+      Span::raw(ratatui::symbols::line::HORIZONTAL),
+      Span::raw(ratatui::symbols::line::HORIZONTAL),
+      Span::raw(VERTICAL_LEFT),
+      Span::styled("<C-c>", Color::Red),
+      Span::styled("Exit", Color::White),
+      Span::raw(VERTICAL_RIGHT),
+    ]
+    .into_iter()
+    .collect()
   }
 
   fn gauge_stats_line(&self) -> Line {
