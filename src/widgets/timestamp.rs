@@ -33,9 +33,9 @@ pub struct Timestamp(DateTime<Local>);
 impl Timestamp {
   pub fn as_spans(&self) -> [Span<'static>; 3] {
     [
-      Span::raw(ratatui::symbols::line::DOUBLE_VERTICAL_LEFT).fg(Color::Magenta),
-      Span::raw(self.0.format("%H:%M:%S").to_string()).fg(Color::DarkGray),
-      Span::raw(ratatui::symbols::line::DOUBLE_VERTICAL_RIGHT).fg(Color::Magenta),
+      Span::raw(ratatui::symbols::line::DOUBLE_VERTICAL_LEFT).fg(Color::DarkGray),
+      Span::raw(self.0.format("%H:%M:%S").to_string()).fg(Color::White),
+      Span::raw(ratatui::symbols::line::DOUBLE_VERTICAL_RIGHT).fg(Color::DarkGray),
     ]
   }
   pub fn now() -> Self {

@@ -5,13 +5,11 @@ use ratatui::prelude::{Color, Stylize};
 use ratatui::text::{Line, Span, ToSpan};
 use ratatui::widgets::ListItem;
 
-use crate::app::handler::BucketStatus;
 use crate::app::handler::sectrails::jsons::Record;
 use crate::widgets::Timestamp;
 
 #[derive(Debug)]
 pub enum Log {
-  Bucket(BucketStatus),
   Record { timestamp: Timestamp, data: Record },
   Info { timestamp: Timestamp, line: Arc<str> },
   Error { timestamp: Timestamp, error: Error },
@@ -19,9 +17,6 @@ pub enum Log {
 }
 
 impl Log {
-  pub fn bucket(bucket: BucketStatus) -> Self {
-    Self::Bucket(bucket)
-  }
   pub fn warn(line: impl Into<Arc<str>>) -> Self {
     Self::Warn {
       timestamp: Default::default(),
@@ -49,7 +44,6 @@ impl Log {
 
   fn timestamp_span(&self) -> [Span; 3] {
     match *self {
-      Log::Bucket(ref bucket) => bucket.timestamp().as_spans(),
       Log::Record { ref timestamp, .. } | Log::Info { ref timestamp, .. } | Log::Error { ref timestamp, .. } | Log::Warn { ref timestamp, .. } => {
         timestamp.as_spans()
       }
@@ -58,11 +52,10 @@ impl Log {
 
   fn color_content(&self) -> Color {
     match *self {
-      Log::Bucket(_) => Color::Black,
       Log::Info { .. } => Color::Rgb(0, 251, 255),
       Log::Error { .. } => Color::Rgb(99, 0, 0),
       Log::Warn { .. } => Color::Rgb(99, 0, 0),
-      _ => todo!(),
+      _ => Color::Black,
     }
   }
 }
@@ -73,7 +66,6 @@ impl<'a> From<&'a Log> for ListItem<'a> {
     spans.push(Span::raw(" "));
 
     let content = match log {
-      Log::Bucket(bucket) => return ListItem::from(bucket),
       Log::Info { line, .. } => Span::from(line.as_ref()).fg(log.color_content()),
       Log::Warn { line, .. } => Span::from(line.as_ref()).fg(log.color_content()),
       Log::Error { error, .. } => error.to_span().fg(log.color_content()),
@@ -86,5 +78,19 @@ impl<'a> From<&'a Log> for ListItem<'a> {
     spans.push(content);
 
     ListItem::from(Line::from_iter(spans))
+  }
+}
+
+impl<'a> From<&'a Log> for Line<'a> {
+  fn from(log: &'a Log) -> Self {
+    let mut spans = Vec::from(log.timestamp_span());
+
+    match *log {
+      Log::Record { ref data, .. } => spans.extend_from_slice(&data.as_spans()),
+      Log::Info { ref line, .. } | Log::Warn { ref line, .. } => spans.push(Span::from(line.as_ref()).fg(log.color_content())),
+      Log::Error { ref error, .. } => spans.push(Span::from(error.to_string()).fg(log.color_content())),
+    };
+
+    Line::from(spans)
   }
 }
