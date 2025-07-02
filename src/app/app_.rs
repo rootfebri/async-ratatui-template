@@ -1,6 +1,7 @@
 use super::*;
+use crate::ARGS;
 use crate::ui::{blk, clear};
-use crate::widgets::{Alert, Input, Logs, Statistic};
+use crate::widgets::{Input, Logs, Statistic};
 use crossterm::event::{Event, KeyEvent};
 use helper::{RenderEvent, keys};
 use ratatui::buffer::Buffer;
@@ -8,9 +9,6 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::prelude::{Line, Stylize, Widget};
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Paragraph, Wrap};
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 
 mod impls;
@@ -31,16 +29,10 @@ pub struct App {
 
   // App data
   focus: bool,
-  input: Option<PathBuf>,
-  output: Option<PathBuf>,
   change_mode: Option<InOutChangeMode>,
   scrols: ScrollStates,
   statistic: Statistic,
-  email: Arc<RwLock<Arc<str>>>,
-  password: Arc<RwLock<Arc<str>>>,
 
-  pub output_tx: WatchTx<PathBuf>,
-  pub input_tx: WatchTx<PathBuf>,
   pub logs: Logs,
 }
 
@@ -89,11 +81,11 @@ impl App {
           Popup::Input(input) => {
             return match self.change_mode {
               Some(InOutChangeMode::Email) => {
-                *self.email.write().await = Arc::from(input.value());
+                ARGS.write().await.email = Some(input.value());
                 Some(RenderEvent::render())
               }
               Some(InOutChangeMode::Password) => {
-                *self.password.write().await = Arc::from(input.value());
+                ARGS.write().await.password = Some(input.value());
                 Some(RenderEvent::render())
               }
               _ => Some(RenderEvent::no_ops()),
@@ -104,8 +96,14 @@ impl App {
           Popup::Alert(_) => return Some(RenderEvent::render()),
           Popup::FileExplorer(state) => {
             return match self.change_mode {
-              Some(InOutChangeMode::Input) => Some(self.change_input(state.take().get().await).await),
-              Some(InOutChangeMode::Output) => Some(self.change_output(state.take().get().await)),
+              Some(InOutChangeMode::Input) => {
+                ARGS.write().await.input = state.take().get().await;
+                return Some(RenderEvent::render());
+              }
+              Some(InOutChangeMode::Output) => {
+                ARGS.write().await.output = state.take().get().await;
+                Some(RenderEvent::render())
+              }
               _ => Some(RenderEvent::no_ops()),
             };
           }
@@ -122,45 +120,12 @@ impl App {
     None
   }
 
-  fn change_output(&mut self, input: Option<PathBuf>) -> RenderEvent {
-    self.output = input;
-    self.output_tx.send_modify(|current| *current = self.output.clone().unwrap());
-
-    RenderEvent::render()
-  }
-
-  async fn change_input(&mut self, input: Option<PathBuf>) -> RenderEvent {
-    if let Some(path) = input {
-      if !path.exists() {
-        let alert = ["File does not exists.".to_string(), format!("File {}.", path.display())];
-        let alert = Alert::new("Invalid Input", alert.into_iter());
-        self.popup = Some(Popup::Alert(alert));
-        return RenderEvent::render();
-      }
-
-      if !path.is_file() {
-        let alert = ["Input is not a file.".to_string(), format!("File {}.", path.display())];
-        let alert = Alert::new("Invalid Input", alert.into_iter());
-        self.popup = Some(Popup::Alert(alert));
-
-        return RenderEvent::render();
-      }
-
-      self.input_tx.send_modify(|watch_path| *watch_path = path.clone());
-      self.input = Some(path);
-
-      return RenderEvent::render();
-    }
-
-    RenderEvent::no_ops()
-  }
-
   async fn handle_key(&mut self, key: KeyEvent) -> Option<RenderEvent> {
     match key {
       keys!(Char('e'), NONE, Press) => {
         self.popup = Some(Popup::Input(Input::new(
           "Add/Change email".to_owned(),
-          self.email.read().await.to_string(),
+          ARGS.read().await.email.clone().unwrap_or_default(),
         )));
         self.change_mode = Some(InOutChangeMode::Email);
         Some(RenderEvent::render())
@@ -168,7 +133,7 @@ impl App {
       keys!(Char('p'), NONE, Press) => {
         self.popup = Some(Popup::Input(Input::new(
           "Add/Change Password".to_owned(),
-          "*".repeat(self.password.read().await.len()),
+          "*".repeat(ARGS.read().await.password.as_ref().map(String::len).unwrap_or_default()),
         )));
         self.change_mode = Some(InOutChangeMode::Password);
         Some(RenderEvent::render())
@@ -204,7 +169,7 @@ impl App {
       .title_top(Line::raw(" Input File: ").fg(Color::White))
       .title_alignment(Alignment::Left)
       .fg(Color::Yellow);
-    let input_value = if let Some(ref path) = self.input {
+    let input_value = if let Some(ref path) = ARGS.blocking_read().input {
       path.display().to_string()
     } else {
       String::from("None")
@@ -222,7 +187,7 @@ impl App {
       .title_alignment(Alignment::Left)
       .fg(Color::Yellow);
 
-    let input_value = if let Some(ref path) = self.output {
+    let input_value = if let Some(ref path) = ARGS.blocking_read().output {
       path.display().to_string()
     } else {
       String::from("None")
@@ -239,15 +204,15 @@ impl App {
       .fg(Color::Red)
       .title_top(Line::styled(" ✉️ Email ", Style::new()).left_aligned().fg(Color::White));
 
-    Paragraph::new(Line::raw(self.email.blocking_read().to_string()).fg(Color::DarkGray)).block(block)
+    Paragraph::new(Line::raw(ARGS.blocking_read().email.clone().unwrap_or_default()).fg(Color::DarkGray)).block(block)
   }
 
   fn draw_password_widget(&self) -> impl Widget {
-    let pwd_len = self.password.blocking_read().len();
+    let pwd_len = ARGS.blocking_read().password.as_ref().map(String::len).unwrap_or_default();
 
     let block = blk()
       .fg(Color::Red)
-      .title_top(Line::styled(" 🔑 Password", Style::new()).left_aligned().fg(Color::White));
+      .title_top(Line::styled(" 🔑 Password ", Style::new()).left_aligned().fg(Color::White));
 
     Paragraph::new(Line::raw("*".repeat(pwd_len)).fg(Color::DarkGray)).block(block)
   }

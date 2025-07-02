@@ -7,7 +7,7 @@ use reqwest::cookie::Jar;
 use reqwest::{Client, Url};
 
 use super::*;
-use crate::SafeRefStr;
+use crate::ARGS;
 use crate::app::handler::sectrails::jsons::PageResponse;
 
 #[derive(Debug)]
@@ -17,17 +17,15 @@ pub struct SecTrailClient {
   client: Client,
   expired: bool,
   base_url: Url,
-  email: SafeRefStr,
-  password: SafeRefStr,
 }
 impl Default for SecTrailClient {
   fn default() -> Self {
-    Self::new(Default::default(), Default::default())
+    Self::new()
   }
 }
 impl SecTrailClient {
   const BASE_URL: &'static str = "https://securitytrails.com/_next/data/";
-  pub fn new(email: SafeRefStr, password: SafeRefStr) -> Self {
+  pub fn new() -> Self {
     let base_url = Url::parse(Self::BASE_URL).unwrap();
 
     Self {
@@ -36,8 +34,6 @@ impl SecTrailClient {
       client: Default::default(),
       expired: true,
       base_url,
-      email,
-      password,
     }
   }
 
@@ -79,7 +75,8 @@ impl SecTrailClient {
   }
 
   async fn new_session(&mut self) -> Result<()> {
-    let puppeteer = SecTrailPuppeteer::new(self.email.read().await, self.password.read().await).await?;
+    let args = ARGS.read().await.clone();
+    let puppeteer = SecTrailPuppeteer::new(args.email.unwrap_or_default(), args.password.unwrap_or_default()).await?;
     let jar = Jar::default();
     for cookie in puppeteer.cookies {
       jar.add_cookie_str(cookie.to_cookie_str().as_str(), &self.base_url);
@@ -119,14 +116,10 @@ impl SecTrailClient {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::new_safe_str;
 
   #[tokio::test]
   async fn test_sectrail_client() {
-    let email = new_safe_str("dagelanfl@pakde.io");
-    let password = new_safe_str("Bocahkosong@588");
-
-    let mut sectrail = SecTrailClient::new(email, password);
+    let mut sectrail = SecTrailClient::new();
     let page1 = sectrail.get().await;
 
     assert!(page1.is_ok(), "{}", page1.unwrap_err());

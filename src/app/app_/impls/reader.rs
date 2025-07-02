@@ -1,39 +1,41 @@
-use std::io::Result;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
 use helper::RenderEvent;
+use std::io::Result;
+use std::path::Path;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::watch::Sender;
 use tokio::{fs, select};
 
-use crate::app::{MpscTx, WatchRx};
+use crate::app::MpscTx;
+use crate::app::app_::impls::change_listener;
 use crate::widgets::{Log, Logs, Statistic};
-use crate::{never, wait_process};
+use crate::{ARGS, never, wait_process};
 
-pub async fn input_reader(
-  line_tx: MpscTx<Arc<str>>,
-  mut watched_input: WatchRx<PathBuf>,
-  event: Sender<RenderEvent>,
-  logs: Logs,
-  statistic: Statistic,
-) {
-  let mut input = watched_input.borrow_and_update().clone();
+pub async fn input_reader(line_tx: MpscTx<Arc<str>>, event: Sender<RenderEvent>, logs: Logs, statistic: Statistic) {
+  let mut input_path = ARGS.read().await.input.clone();
 
   loop {
     select! {
-      new_input = watched_input.wait_for(|current| *current != input) => input = new_input.unwrap().clone(),
-      _ = read(&input, &line_tx, &event, logs.clone(), statistic.clone()) => {}
+      _ = change_listener(|args| args.input.as_deref() == input_path.as_deref()) => input_path = ARGS.read().await.input.clone(),
+      _ = read(input_path.as_deref(), &line_tx, &event, logs.clone(), statistic.clone()) => {}
     }
   }
 }
 
-pub async fn read(path: impl AsRef<Path>, sender: &MpscTx<Arc<str>>, event: &Sender<RenderEvent>, logs: Logs, statistic: Statistic) -> Result<()> {
+pub async fn read(
+  path: Option<impl AsRef<Path>>,
+  sender: &MpscTx<Arc<str>>,
+  event: &Sender<RenderEvent>,
+  logs: Logs,
+  statistic: Statistic,
+) -> Result<()> {
+  let Some(ref_path) = path else { never!() };
+
   wait_process!();
-  let info = format!("Input reader started reading `{}`", path.as_ref().display());
+  let info = format!("Input reader started reading `{}`", ref_path.as_ref().display());
   logs.add(Log::info(info)).await;
 
-  let mut file = match fs::File::open(&path).await {
+  let mut file = match fs::File::open(&ref_path).await {
     Ok(file) => file,
     Err(err) => {
       logs.add(Log::error(err)).await;
@@ -80,7 +82,7 @@ pub async fn read(path: impl AsRef<Path>, sender: &MpscTx<Arc<str>>, event: &Sen
     event.send_modify(|e| *e = RenderEvent::render());
   }
 
-  let info = format!("Input reader finished reading `{}`", path.as_ref().display());
+  let info = format!("Input reader finished reading `{}`", ref_path.as_ref().display());
   logs.add(Log::info(info)).await;
 
   never!()

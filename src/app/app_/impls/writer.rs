@@ -1,32 +1,35 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use helper::RenderEvent;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, select};
 
+use crate::app::app_::impls::change_listener;
 use crate::app::handler::sectrails::jsons::Record;
-use crate::app::{MpscRx, WatchRx, WatchTx};
+use crate::app::{MpscRx, WatchTx};
 use crate::widgets::{Log, Logs};
-use crate::{never, wait_process};
+use crate::{ARGS, never, wait_process};
 
-pub async fn output_writer(mut bucket_rx: MpscRx<Record>, mut output_rx: WatchRx<PathBuf>, event: WatchTx<RenderEvent>, logs: Logs) {
-  let mut output = output_rx.borrow_and_update().clone();
+pub async fn output_writer(mut bucket_rx: MpscRx<Record>, event: WatchTx<RenderEvent>, logs: Logs) {
+  let mut output_path = ARGS.read().await.output.clone();
+
   loop {
     select! {
-      new_output = output_rx.wait_for(|path| *path != output) => output = new_output.unwrap().clone(),
-      _ = writer(&mut bucket_rx, &output, &event, logs.clone()) => continue
+      _ = change_listener(|args| args.input.as_deref() == output_path.as_deref()) => output_path = ARGS.read().await.input.clone(),
+      _ = writer(&mut bucket_rx, output_path.as_deref(), &event, logs.clone()) => continue
     }
   }
 }
 
-pub async fn writer(rx: &mut MpscRx<Record>, output: &PathBuf, event: &WatchTx<RenderEvent>, logs: Logs) {
+pub async fn writer(rx: &mut MpscRx<Record>, output: Option<impl AsRef<Path>>, event: &WatchTx<RenderEvent>, logs: Logs) {
+  let Some(output) = output else { never!() };
   wait_process!();
-  let info = format!("Writer working on `{}`", output.display());
+  let info = format!("Writer working on `{}`", output.as_ref().display());
   logs.add(Log::info(info)).await;
 
-  let file = match fs::File::options().create(true).append(true).open(output).await {
+  let file = match fs::File::options().create(true).append(true).open(&output).await {
     Ok(file) => {
-      logs.add(Log::info(format!("Opened file: {}", output.display()))).await;
+      logs.add(Log::info(format!("Opened file: {}", output.as_ref().display()))).await;
       file
     }
     Err(err) => {

@@ -18,6 +18,7 @@ pub struct SecTrailPuppeteer {
 impl SecTrailPuppeteer {
   pub async fn new(email: impl ToString, password: impl ToString) -> Result<Self> {
     setup_bun().await?;
+    install_deps().await?;
 
     let cmd = Command::new("bun")
       .args([String::from("run"), String::from("index.ts"), email.to_string(), password.to_string()])
@@ -32,6 +33,20 @@ impl SecTrailPuppeteer {
     } else {
       bail!(String::from_utf8_lossy(&cmd.stderr).into_owned())
     }
+  }
+}
+
+pub async fn install_deps() -> Result<()> {
+  let bun_cmd = Command::new("bun")
+    .stdout(Stdio::inherit())
+    .stderr(Stdio::inherit())
+    .args(["i"])
+    .output()
+    .await?;
+  if bun_cmd.status.success() {
+    Ok(())
+  } else {
+    bail!(String::from_utf8_lossy(&bun_cmd.stderr).to_string())
   }
 }
 

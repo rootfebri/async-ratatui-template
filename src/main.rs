@@ -7,16 +7,23 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
 use std::io::{Result, stdout};
-use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::RwLock;
 use tokio::task::block_in_place;
 
 use crate::app::{App, SYNC_STATE};
 use crate::args::AppArgs;
 use crate::widgets::Log;
 
-pub static CHECKER_WORKER: Semaphore = Semaphore::const_new(1);
+pub static ARGS: RwLock<AppArgs> = RwLock::const_new(AppArgs {
+  fps: 0,
+  email: None,
+  password: None,
+  headless: false,
+  username: None,
+  input: None,
+  output: None,
+});
 pub type Area = Rect;
 
 pub mod app;
@@ -24,15 +31,17 @@ pub mod areas;
 pub mod args;
 pub mod ui;
 pub mod widgets;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+  *ARGS.write().await = AppArgs::parse();
   let backend = CrosstermBackend::new(stdout());
   let mut terminal = Terminal::new(backend)?;
   terminal.hide_cursor()?;
   enable_raw_mode()?;
   execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
 
-  let mut fps = AppArgs::parse().create_fps_interval();
+  let mut fps = ARGS.read().await.create_fps_interval();
   let mut status: Result<()> = Ok(());
   let mut event = PollEvent::default();
   let mut app = App::default();
@@ -118,9 +127,4 @@ async fn test_widget(
   }
 
   Ok(())
-}
-pub type SafeRefStr = Arc<RwLock<Arc<str>>>;
-
-pub fn new_safe_str(value: impl Into<Arc<str>>) -> SafeRefStr {
-  Arc::new(RwLock::new(value.into()))
 }
