@@ -1,14 +1,13 @@
-use std::net::Ipv4Addr;
-use std::str::FromStr;
-use std::sync::Arc;
-
-use anyhow::{Result, bail};
-use reqwest::cookie::Jar;
-use reqwest::{Client, Url};
-
 use super::*;
 use crate::ARGS;
 use crate::app::handler::sectrails::jsons::PageResponse;
+use anyhow::{Context, Result, bail};
+use reqwest::cookie::Jar;
+use reqwest::{Client, Response, Url};
+use std::net::Ipv4Addr;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct SecTrailClient {
@@ -44,28 +43,33 @@ impl SecTrailClient {
 
   pub async fn get(&mut self) -> Result<PageResponse> {
     if self.expired {
-      self.new_session().await?;
+      self.new_session().await.context("New sessionizer has failed!")?;
     }
 
     let url = self.next_url();
-    let response = match self.client.get(url).send().await {
+    let response = match self.client.get(url).send().await.and_then(Response::error_for_status) {
       Ok(response) => response,
       Err(error) => {
-        if error.is_request() {
+        if error.is_status() && error.status().unwrap().is_client_error() {
+          tokio::time::sleep(Duration::from_secs(30)).await;
+          bail!("Soft Error: Rate Limited and slept for 30s",);
+        } else if error.is_request() {
           self.expired = true;
         }
-        bail!(error);
+
+        bail!(
+          "Hard error: {error} | Happens while making a request for {} on page {}",
+          self.data,
+          self.page()
+        );
       }
     };
 
     let body = response.bytes().await?;
-
-    #[cfg(test)]
-    {
-      eprintln!("Response: {}", String::from_utf8_lossy(&body));
-    }
-
-    let page_response: PageResponse = serde_json::from_slice(&body)?;
+    let page_response: PageResponse = match serde_json::from_slice(&body) {
+      Ok(ps) => ps,
+      Err(err) => bail!("Failed to parse response: {err}"),
+    };
 
     if !page_response.page_props.server_response.data.records.is_empty() {
       self.page += 1;

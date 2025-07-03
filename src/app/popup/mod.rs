@@ -7,16 +7,13 @@ use helper::RenderEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Constraint, Widget};
-use ratatui::widgets::Paragraph;
 
-use crate::ui::{center_constraints, clear, fix_center};
-use crate::widgets::{Alert, Confirmation, Input};
+use crate::ui::center_constraints;
+use crate::widgets::{Confirmation, Input};
 
 pub enum Popup {
   Input(Input),
   Confirmation(Confirmation),
-  Warning(Paragraph<'static>),
-  Alert(Alert),
   FileExplorer(RefCell<ExplorerState>),
 }
 
@@ -25,8 +22,6 @@ impl Popup {
     match *self {
       Popup::Input(ref mut input) => input.handle_event(event),
       Popup::Confirmation(ref mut modal) => modal.handle_key(event.as_key_event()?),
-      Popup::Warning(_) => todo!(),
-      Popup::Alert(ref mut alert) => alert.handle_event(event),
       Popup::FileExplorer(ref mut explore_state) => match event {
         Event::Key(key) => explore_state.get_mut().handle_key(*key).await,
         Event::Paste(content) => Some(explore_state.get_mut().handle_paste(content)),
@@ -39,8 +34,6 @@ impl Popup {
     match *self {
       Popup::Input(_) => center_constraints(area, Constraint::Min(55), Constraint::Length(15)),
       Popup::Confirmation(..) => center_constraints(area, Constraint::Length(55), Constraint::Length(7)),
-      Popup::Warning(_) => fix_center(area, 15, 15),
-      Popup::Alert(_) => fix_center(area, 25, 25),
       Popup::FileExplorer(_) => center_constraints(area, Constraint::Percentage(80), Constraint::Percentage(90)),
     }
   }
@@ -56,11 +49,6 @@ impl Widget for &Popup {
     match self {
       Popup::Input(widget) => widget.render(area, buf),
       Popup::Confirmation(modal) => modal.render(area, buf),
-      Popup::Warning(widget) => {
-        clear(area, buf);
-        widget.render(area, buf);
-      }
-      Popup::Alert(widget) => widget.render(area, buf),
       Popup::FileExplorer(state) => Explorer::new(state.borrow_mut().deref_mut()).render(area, buf),
     }
   }

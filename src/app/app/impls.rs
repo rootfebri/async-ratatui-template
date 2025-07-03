@@ -21,6 +21,7 @@ impl Default for App {
     tasks.spawn(input_reader(line_tx, event_watcher.clone(), logs.clone(), statistic.clone()));
     tasks.spawn(line_checker(line_rx, recorder, event_watcher.clone(), logs.clone(), statistic.clone()));
     tasks.spawn(output_writer(records, event_watcher.clone(), logs.clone()));
+    tasks.spawn(stats_updater(statistic.clone(), event_watcher.clone()));
 
     Self {
       popup: None,
@@ -38,11 +39,22 @@ mod checker;
 mod reader;
 mod writer;
 
-async fn change_listener(ops: impl Fn(&AppArgs) -> bool) {
+async fn stats_updater(statistic: Statistic, event_watcher: WatchTx<RenderEvent>) {
+  let mut interval = tokio::time::interval(Duration::from_secs(1));
+
+  loop {
+    interval.tick().await;
+    statistic.update_rate();
+    event_watcher.send_modify(|e| *e = RenderEvent::render());
+  }
+}
+
+async fn change_listener(logs: &Logs, ops: impl Fn(&AppArgs) -> bool) {
   loop {
     let args = ARGS.read().await;
     let fps = args.fps;
     if ops(&args) {
+      logs.info("New changes detected").await;
       break;
     } else {
       drop(args);

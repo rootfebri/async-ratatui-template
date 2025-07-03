@@ -90,8 +90,6 @@ impl App {
           _ => Some(RenderEvent::no_ops()),
         },
         Popup::Confirmation(confirmation) => confirmation.call_submit(self).await,
-        Popup::Warning(_) => todo!(),
-        Popup::Alert(_) => Some(RenderEvent::render()),
         Popup::FileExplorer(state) => match self.change_mode {
           Some(InOutChangeMode::Input) => {
             ARGS.write().await.input = state.take().get().await;
@@ -116,6 +114,46 @@ impl App {
 
   async fn handle_key(&mut self, key: KeyEvent) -> Option<RenderEvent> {
     match key {
+      keys!(Esc, NONE, Press) => {
+        SYNC_STATE.idle();
+        Some(RenderEvent::render())
+      }
+      keys!(Char('p'), CONTROL, Press) => {
+        if SYNC_STATE.is_processing() {
+          SYNC_STATE.idle();
+          Some(RenderEvent::render())
+        } else {
+          Some(RenderEvent::no_ops())
+        }
+      }
+      keys!(Char('s'), CONTROL, Press) => {
+        if !SYNC_STATE.is_processing() {
+          SYNC_STATE.process();
+          Some(RenderEvent::render())
+        } else {
+          Some(RenderEvent::no_ops())
+        }
+      }
+      keys!(Char('c'), CONTROL, Press) => {
+        if SYNC_STATE.is_processing() {
+          let on_cancel = app_action!(async |_app| RenderEvent::render());
+          let on_submit = app_action!(async |app| {
+            app.logs.add(Log::warn("Force exiting...")).await;
+            SYNC_STATE.exit();
+            RenderEvent::render()
+          });
+
+          let state = Confirmation::new("There is still a background process...".to_string())
+            .title(String::from("Are you sure?"))
+            .on_cancel(on_cancel)
+            .on_submit(on_submit);
+          self.popup = Some(Popup::Confirmation(state));
+        } else {
+          SYNC_STATE.exit();
+        }
+
+        Some(RenderEvent::render())
+      }
       keys!(Char('e'), NONE, Press) => {
         self.popup = Some(Popup::Input(Input::new(
           "Add/Change email".to_owned(),
@@ -140,34 +178,6 @@ impl App {
       keys!(Char('o'), NONE, Press) => {
         self.popup = Some(Popup::FileExplorer(Default::default()));
         self.change_mode = Some(InOutChangeMode::Output);
-        Some(RenderEvent::render())
-      }
-      keys!(Char('s'), CONTROL, Press) => {
-        SYNC_STATE.process();
-        Some(RenderEvent::render())
-      }
-      keys!(Char('c'), CONTROL, Press) => {
-        if SYNC_STATE.is_processing() {
-          let on_cancel = app_action!(async |_app| RenderEvent::render());
-          let on_submit = app_action!(async |app| {
-            app.logs.add(Log::warn("Force exiting...")).await;
-            SYNC_STATE.exit();
-            RenderEvent::render()
-          });
-
-          let state = Confirmation::new("There is still a background process...".to_string())
-            .title(String::from("Are you sure?"))
-            .on_cancel(on_cancel)
-            .on_submit(on_submit);
-          self.popup = Some(Popup::Confirmation(state));
-        } else {
-          SYNC_STATE.exit();
-        }
-
-        Some(RenderEvent::render())
-      }
-      keys!(Esc, NONE, Press) => {
-        SYNC_STATE.idle();
         Some(RenderEvent::render())
       }
       KeyEvent { .. } => None,

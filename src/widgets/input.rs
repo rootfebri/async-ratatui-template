@@ -49,7 +49,7 @@ impl Input {
         let len = self.state.borrow().len();
         self.state.get_mut().set_cursor(len)
       }
-      Event::Key(keys!(Char(chr), NONE, Press)) => self.state.get_mut().push(*chr),
+      Event::Key(keys!(Char(chr), NONE | SHIFT, Press)) => self.state.get_mut().push(*chr),
       Event::Paste(content) => self.state.get_mut().push_str(content),
 
       _ => return None,
@@ -140,16 +140,16 @@ impl Input {
         0
       };
 
-      let visible: String = display_text
-        .chars()
-        .skip(scroll_offset)
-        .take(max_visible_chars)
-        .collect();
+      let visible: String = display_text.chars().skip(scroll_offset).take(max_visible_chars).collect();
 
       let visible_cursor = cursor_char_pos.saturating_sub(scroll_offset);
       (visible, visible_cursor)
     } else {
-      let cursor_char_pos = if text.is_empty() { 0 } else { text[..cursor_pos.min(text.len())].chars().count() };
+      let cursor_char_pos = if text.is_empty() {
+        0
+      } else {
+        text[..cursor_pos.min(text.len())].chars().count()
+      };
       (display_text.to_string(), cursor_char_pos)
     };
 
@@ -168,9 +168,7 @@ impl Input {
           ' '
         };
 
-        let cursor_span = Span::raw(cursor_char.to_string())
-          .bg(cursor_style)
-          .fg(Color::Black);
+        let cursor_span = Span::raw(cursor_char.to_string()).bg(cursor_style).fg(Color::Black);
 
         let cursor_line = Line::from(cursor_span);
         let cursor_area = Rect {

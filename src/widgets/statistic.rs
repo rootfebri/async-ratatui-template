@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use crate::app::SYNC_STATE;
 use crate::ui::{blk, clear};
@@ -7,7 +8,6 @@ use crate::widgets::pulse::PulseState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Style, Stylize, Widget};
-use ratatui::symbols::DOT;
 use ratatui::symbols::border::Set;
 use ratatui::symbols::line::{VERTICAL_LEFT, VERTICAL_RIGHT};
 use ratatui::text::{Line, Span, ToLine};
@@ -18,6 +18,10 @@ pub struct Statistic {
   cur: Arc<AtomicUsize>,
   max: Arc<AtomicUsize>,
   pulse_state: Arc<Mutex<PulseState>>,
+  start_time: Arc<Mutex<Option<SystemTime>>>,
+  processed_rate: Arc<AtomicUsize>, // items per second
+  errors: Arc<AtomicUsize>,
+  bytes_processed: Arc<AtomicUsize>,
 }
 
 type InnerBlockArea = Rect;
@@ -50,6 +54,54 @@ impl Statistic {
     self.max.load(Ordering::Relaxed)
   }
 
+  pub fn start_processing(&self) {
+    *self.start_time.lock().unwrap() = Some(SystemTime::now());
+  }
+
+  pub fn stop_processing(&self) {
+    *self.start_time.lock().unwrap() = None;
+  }
+
+  pub fn increment_errors(&self) {
+    self.errors.fetch_add(1, Ordering::Relaxed);
+  }
+
+  pub fn get_errors(&self) -> usize {
+    self.errors.load(Ordering::Relaxed)
+  }
+
+  pub fn add_bytes_processed(&self, bytes: usize) {
+    self.bytes_processed.fetch_add(bytes, Ordering::Relaxed);
+  }
+
+  pub fn get_bytes_processed(&self) -> usize {
+    self.bytes_processed.load(Ordering::Relaxed)
+  }
+
+  pub fn update_rate(&self) {
+    if let Some(start_time) = *self.start_time.lock().unwrap() {
+      if let Ok(elapsed) = start_time.elapsed() {
+        let seconds = elapsed.as_secs() as usize;
+        if seconds > 0 {
+          let rate = self.get_cur() / seconds;
+          self.processed_rate.store(rate, Ordering::Relaxed);
+        }
+      }
+    }
+  }
+
+  pub fn get_processing_rate(&self) -> usize {
+    self.processed_rate.load(Ordering::Relaxed)
+  }
+
+  pub fn get_elapsed_time(&self) -> Option<std::time::Duration> {
+    if let Some(start_time) = *self.start_time.lock().unwrap() {
+      start_time.elapsed().ok()
+    } else {
+      None
+    }
+  }
+
   pub fn get_percentage(&self) -> f64 {
     if self.get_max() == 0 {
       0.0
@@ -69,13 +121,37 @@ impl Statistic {
   }
 
   fn draw_bar_percentage(&self) -> LineGauge {
+    let status_color = match SYNC_STATE.as_ref() {
+      "PROCESSING" => Color::Green,
+      "EXITING" => Color::Red,
+      _ => Color::Yellow,
+    };
+
+    let status_icon = match SYNC_STATE.as_ref() {
+      "PROCESSING" => "⚡",
+      "EXITING" => "⏹",
+      _ => "⏸",
+    };
+
     let indicator_line: Line = [
-      Span::raw(ratatui::symbols::line::HORIZONTAL),
       Span::raw(" "),
-      Span::raw(DOT).fg(self.pulse_state.try_lock().unwrap().color(SYNC_STATE.as_pulse_level())),
-      Span::raw(SYNC_STATE.as_ref()),
+      Span::raw(status_icon).fg(status_color),
       Span::raw(" "),
-      Span::raw(ratatui::symbols::line::CROSS),
+      Span::styled(SYNC_STATE.as_ref(), Style::default().fg(status_color).bold()),
+      Span::raw(" "),
+    ]
+    .into_iter()
+    .collect();
+
+    let percentage_text = format!("{:.1}%", self.get_percentage());
+    let stats_line: Line = [
+      Span::raw(" "),
+      Span::styled(self.get_cur().to_string(), Style::default().fg(Color::Cyan).bold()),
+      Span::raw(" / "),
+      Span::styled(self.get_max().to_string(), Color::White),
+      Span::raw(" ("),
+      Span::styled(percentage_text, Style::default().fg(Color::Yellow).bold()),
+      Span::raw(") "),
     ]
     .into_iter()
     .collect();
@@ -83,14 +159,94 @@ impl Statistic {
     let block = blk()
       .fg(Color::Reset)
       .title_top(indicator_line.left_aligned())
-      .title_top(self.gauge_stats_line().right_aligned());
+      .title_top(stats_line.right_aligned());
 
     LineGauge::default()
       .ratio(self.get_percentage() / 100f64)
-      .line_set(ratatui::symbols::line::NORMAL)
+      .line_set(ratatui::symbols::line::THICK)
       .block(block)
-      .filled_style(self.gauge_color())
+      .filled_style(Style::default().fg(self.gauge_color()).bold())
       .unfilled_style(Style::default().fg(Color::DarkGray))
+  }
+
+  fn draw_statistics_info(&self, area: Rect, buf: &mut Buffer) {
+    if area.height < 4 {
+      return;
+    }
+
+    let lines = vec![
+      self.create_info_line("📊", "Progress", &format!("{}/{}", self.get_cur(), self.get_max())),
+      self.create_info_line("⚠️", "Errors", &self.get_errors().to_string()),
+      self.create_info_line("💾", "Data", &self.format_bytes(self.get_bytes_processed())),
+      self.create_info_line("⚡", "Rate", &format!("{}/s", self.get_processing_rate())),
+      self.create_info_line("⏱️", "Time", &self.format_elapsed_time()),
+    ];
+
+    let mut y = area.y;
+    for line in lines.iter().take((area.height as usize).saturating_sub(1)) {
+      if y >= area.y + area.height {
+        break;
+      }
+      
+      let line_area = Rect {
+        x: area.x,
+        y,
+        width: area.width,
+        height: 1,
+      };
+      
+      let widget = ratatui::widgets::Paragraph::new(line.clone());
+      widget.render(line_area, buf);
+      y += 1;
+    }
+  }
+
+  fn create_info_line(&self, icon: &str, label: &str, value: &str) -> Line<'static> {
+    vec![
+      Span::raw(" ".to_string()),
+      Span::raw(icon.to_string()),
+      Span::raw(" ".to_string()),
+      Span::styled(label.to_string(), Color::Gray),
+      Span::raw(": ".to_string()),
+      Span::styled(value.to_string(), Style::default().fg(Color::White).bold()),
+      Span::raw(" ".to_string()),
+    ]
+    .into()
+  }
+
+  fn format_bytes(&self, bytes: usize) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit_index = 0;
+
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+      size /= 1024.0;
+      unit_index += 1;
+    }
+
+    if unit_index == 0 {
+      format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+      format!("{:.1} {}", size, UNITS[unit_index])
+    }
+  }
+
+  fn format_elapsed_time(&self) -> String {
+    match self.get_elapsed_time() {
+      Some(duration) => {
+        let total_seconds = duration.as_secs();
+        let hours = total_seconds / 3600;
+        let minutes = (total_seconds % 3600) / 60;
+        let seconds = total_seconds % 60;
+
+        if hours > 0 {
+          format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+        } else {
+          format!("{:02}:{:02}", minutes, seconds)
+        }
+      }
+      None => "00:00".to_string(),
+    }
   }
 
   fn gauge_color(&self) -> Color {
@@ -152,21 +308,6 @@ impl Statistic {
     .into_iter()
     .collect()
   }
-
-  fn gauge_stats_line(&self) -> Line {
-    let current = self.get_cur();
-    let max = self.get_max();
-
-    let spans = vec![
-      Span::raw(" "),
-      Span::raw(current.to_string()).fg(Color::Yellow),
-      Span::raw(" / "),
-      Span::raw(max.to_string()).fg(Color::White),
-      Span::raw(" "),
-    ];
-
-    Line::from(spans)
-  }
 }
 
 impl Widget for &Statistic {
@@ -176,10 +317,21 @@ impl Widget for &Statistic {
   {
     let inner_area = self.draw_outer_block(area, buf);
 
-    let [gauge_area, _] = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(inner_area);
+    // Split the area: gauge at top (3 lines), stats info below
+    let [gauge_area, stats_area] = Layout::vertical([
+      Constraint::Length(3), 
+      Constraint::Fill(1)
+    ]).areas(inner_area);
 
+    // Render the progress gauge
     clear(gauge_area, buf);
     self.draw_bar_percentage().render(gauge_area, buf);
+
+    // Render the statistics information
+    if stats_area.height > 0 {
+      clear(stats_area, buf);
+      self.draw_statistics_info(stats_area, buf);
+    }
   }
 }
 

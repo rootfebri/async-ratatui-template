@@ -37,9 +37,8 @@ pub struct RenderEvent {
 }
 
 impl RenderEvent {
-  pub fn make_handled(&mut self) {
-    self.kind = RenderKind::Handled;
-    self.event_time = Local::now();
+  pub fn modif_render(&mut self) {
+    *self = Self::render();
   }
 
   pub fn new(event: RenderKind) -> Self {

@@ -13,7 +13,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::prelude::{Stylize, Text, Widget};
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
@@ -204,7 +204,10 @@ impl Widget for &Logs {
 
     let locked_items = self.items.blocking_read();
     let lines: Text = locked_items.iter().map(Line::from).collect();
-    let widget = Paragraph::new(lines).block(block).scroll(self.state.blocking_read().as_tuple());
+    let widget = Paragraph::new(lines)
+      .block(block)
+      .wrap(Wrap { trim: false })
+      .scroll(self.state.blocking_read().as_tuple());
 
     clear(area, buf);
     widget.render(area, buf);

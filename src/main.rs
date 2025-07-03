@@ -1,5 +1,4 @@
-use std::io::{Result, stdout};
-
+use anyhow::{Error, Result};
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, MouseEvent};
 use crossterm::execute;
@@ -10,6 +9,7 @@ use rand::Rng;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
+use std::io::stdout;
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::task::block_in_place;
@@ -93,7 +93,7 @@ async fn add_random_debug_log(app: &App) {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
   *ARGS.write().await = AppArgs::parse();
   let backend = CrosstermBackend::new(stdout());
   let mut terminal = Terminal::new(backend)?;
@@ -121,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
       poll = event.fuse_read() => match poll {
         Ok(event) => app.handle(event).await,
         Err(error) => {
-          status = Err(error);
+          status = Err(Error::from(error));
           continue;
         },
       },
@@ -141,8 +141,7 @@ async fn main() -> anyhow::Result<()> {
   execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
   terminal.show_cursor()?;
 
-  status?;
-  Ok(())
+  status
 }
 
 #[macro_export]

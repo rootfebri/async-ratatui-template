@@ -16,7 +16,7 @@ pub async fn input_reader(line_tx: MpscTx<Arc<str>>, event: Sender<RenderEvent>,
 
   loop {
     select! {
-      _ = change_listener(|args| args.input.as_deref() == input_path.as_deref()) => input_path = ARGS.read().await.input.clone(),
+      _ = change_listener(&logs, |args| args.input.as_deref() != input_path.as_deref()) => input_path = ARGS.read().await.input.clone(),
       _ = read(input_path.as_deref(), &line_tx, &event, logs.clone(), statistic.clone()) => {}
     }
   }
@@ -32,6 +32,8 @@ pub async fn read(
   let Some(ref_path) = path else { never!() };
 
   wait_process!();
+  statistic.start_processing();
+
   let info = format!("Input reader started reading `{}`", ref_path.as_ref().display());
   logs.add(Log::info(info)).await;
 
@@ -84,6 +86,8 @@ pub async fn read(
 
   let info = format!("Input reader finished reading `{}`", ref_path.as_ref().display());
   logs.add(Log::info(info)).await;
+
+  statistic.stop_processing();
 
   never!()
 }
